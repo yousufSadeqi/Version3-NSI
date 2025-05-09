@@ -1,4 +1,8 @@
-import { StyleSheet, View, ScrollView, Alert, Text, ViewStyle, Pressable, Platform, TouchableOpacity, Dimensions, Image } from 'react-native';
+// Todo fix the camera permission cause it need full access instead of only camera permission 
+
+
+
+import { StyleSheet, View, ScrollView, Alert, Text, ViewStyle, Pressable, Platform, TouchableOpacity, Dimensions, Image, ActivityIndicator } from 'react-native';
 import React, { useState, useMemo, useEffect } from 'react';
 import { colors, radius, spacingX, spacingY } from '@/constants/theme';
 import { scale, verticalScale } from '@/utils/styling';
@@ -31,6 +35,13 @@ import { processReceipt } from '@/service/ReceiptService';
 import { uploadFileToCloudinary } from '@/service/ImageService';
 import { ENDPOINTS } from '@/config/api';
 import Modal from 'react-native-modal';
+import Loading from '@/components/loading';
+import CameraScanner from './cameraScanner';
+import ScreenWrapper from '@/components/ScreenWrapper';
+
+// Camera Dimensision Full screen
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const SCAN_AREA_SIZE = SCREEN_WIDTH * 0.85;
 
 type CategoryOption = {
   label: string;
@@ -67,7 +78,7 @@ const TransactionModal = () => {
   const [isExistingTransaction, setIsExistingTransaction] = useState(false);
   const { isDarkMode, themeColors } = useTheme();
   const [activeIndex, setActiveIndex] = useState(0); // 0 for Manual, 1 for Auto
-  const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
+  // const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
   const [cameraType, setCameraType] = useState<'front' | 'back'>('back');
   const [flash, setFlash] = useState<'on' | 'off'>('off');
   const [isCameraActive, setIsCameraActive] = useState(false);
@@ -75,7 +86,7 @@ const TransactionModal = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const cameraRef = React.useRef<any>(null);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
-  const [isPreviewMode, setIsPreviewMode] = useState(false);
+  // const [isPreviewMode, setIsPreviewMode] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
   const [isProcessingReceipt, setIsProcessingReceipt] = useState(false);
   const [isServerOnline, setIsServerOnline] = useState(false);
@@ -86,10 +97,21 @@ const TransactionModal = () => {
   const [showResultModal, setShowResultModal] = useState(false);
   const [processingError, setProcessingError] = useState<string | null>(null);
 
+  // New camera 
+  const [isCameraOn, setCameraOn] = useState(false);
+  const [facing, setFacing] = useState('back');
+  const [photo, setPhoto] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const handleRetry = () => {
+    setPhoto(null);
+    setIsLoading(false);
+  };
+
+
   const { data: wallets } = useFetchData<WalletType>('Wallets', [
     where('uid', '==', user?.uid),
   ]);
-
   const [transaction, setTransaction] = useState<TransactionType>({
     type: 'expense',
     amount: 0,
@@ -102,6 +124,7 @@ const TransactionModal = () => {
 
   const [loading, setLoading] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [wallet, setWallet] = useState()
 
   const walletOptions = useMemo(() => 
     wallets?.map(wallet => ({
@@ -153,7 +176,10 @@ const TransactionModal = () => {
         quality: 0.8,
       });
       if (!result.canceled && result.assets?.[0]) {
-        setTransaction(prev => ({ ...prev, image: result.assets[0].uri }));
+        setTransaction(prev => ({
+          ...prev,
+          image: result.assets[0].uri  // ✅ THIS is where you store the URI only
+        }));
       }
     } catch (error) {
       console.error("Image picker error:", error);
@@ -232,30 +258,29 @@ const TransactionModal = () => {
       return false;
     }
   };
-
-  const handleCameraPermissionDenied = () => {
-    Alert.alert(
-      'Camera Permission Required',
-      'Please enable camera access in your device settings to use the auto scan feature.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Open Settings', 
-          onPress: () => {
-            if (Platform.OS === 'ios') {
-              Linking.openURL('app-settings:');
-            } else {
-              Linking.openSettings();
-            }
-          }
-        }
-      ]
-    );
-  };
+  // This is useless cause I found out that there is a function useCameraPermission that can do it for me
+  // const handleCameraPermissionDenied = () => {
+  //   Alert.alert(
+  //     'Camera Permission Required',
+  //     'Please enable camera access in your device settings to use the auto scan feature.',
+  //     [
+  //       { text: 'Cancel', style: 'cancel' },
+  //       { 
+  //         text: 'Open Settings', 
+  //         onPress: () => {
+  //           if (Platform.OS === 'ios') {
+  //             Linking.openURL('app-settings:');
+  //           } else {
+  //             Linking.openSettings();
+  //           }
+  //         }
+  //       }
+  //     ]
+  //   );
+  // };
 
   const handleSaveTransaction = async () => {
     const {type, amount, description, category, date, walletId, image} = transaction;
-
     if (!amount || !description || !category || !walletId) {
       Alert.alert('Error', 'Please fill in all required fields');
       return;
@@ -342,9 +367,9 @@ const TransactionModal = () => {
     );
   };
 
-  const renderDropdownIcon = () => (
-    <Icons.CaretDown size={20} color={colors.neutral300} weight="bold" />
-  );
+  // const renderDropdownIcon = () => (
+  //   <Icons.CaretDown size={20} color={colors.neutral300} weight="bold" />
+  // );
 
   const renderLeftIcon = (visible?: boolean) => {
     const selectedCategory = categoryOptions.find(cat => cat.value === transaction.category);
@@ -389,6 +414,7 @@ const TransactionModal = () => {
     setIsProcessing(false);
     setIsProcessingReceipt(false);
     setIsCameraActive(false);
+    setCameraOn(false);
     
     Alert.alert(
       'Connection Error',
@@ -443,10 +469,7 @@ const TransactionModal = () => {
         );
         return;
       }
-      
-      setIsCameraActive(true);
-      requestPermission();
-      
+
       setTimeout(async () => {
         if (!cameraRef.current) {
           setIsCameraActive(false);
@@ -454,26 +477,27 @@ const TransactionModal = () => {
           return;
         }
     
-    try {
-      setIsProcessing(true);
-      const photo = await cameraRef.current.takePictureAsync({
-        quality: 0.7,
-        skipProcessing: true,
-      });
-      
+        try {
+          setIsProcessing(true);
+          const photo = await cameraRef.current.takePictureAsync({
+            quality: 0.7,
+            skipProcessing: true,
+          });
+          
+          // Immediately disable camera after capturing
           setIsCameraActive(false);
           setShowFullScreenLoader(true);
           setCapturedImage(photo.uri);
           
           try {
-      const uploadResult = await uploadFileToCloudinary(
-        { uri: photo.uri, type: 'image/jpeg' },
-        'Receipt Photos'
-      );
-
-      if (!uploadResult.success) {
+            const uploadResult = await uploadFileToCloudinary(
+              { uri: photo.uri, type: 'image/jpeg' },
+              'Receipt Photos'
+            );
+            
+            if (!uploadResult.success) {
               throw new Error(uploadResult.msg || 'Failed to upload image');
-      }
+            }
 
             await processReceivedImage(photo.uri);
           } catch (uploadError) {
@@ -485,15 +509,15 @@ const TransactionModal = () => {
               handleNetworkError(processError);
             }
           }
-    } catch (error) {
+        } catch (error) {
           console.error('Error taking picture:', error);
           setProcessingError('Failed to capture photo. Please try again.');
           setShowFullScreenLoader(false);
           setIsCameraActive(false);
-    } finally {
-      setIsProcessing(false);
+        } finally {
+          setIsProcessing(false);
         }
-      }, 1000); 
+      }, 500); 
     } catch (error) {
       console.error('Error during server check:', error);
       handleNetworkError(error);
@@ -504,6 +528,8 @@ const TransactionModal = () => {
     if (!imageUri) {
       setProcessingError('No image captured');
       setShowFullScreenLoader(false);
+      setIsCameraActive(false);
+      setCameraOn(false);
       return;
     }
 
@@ -534,7 +560,7 @@ const TransactionModal = () => {
       const data = receiptResult.data || {};
       
       setReceiptData(data);
-      
+      // Todo find out why it's giving the red underline while working compleletly fine
       const amount = typeof data.amount === 'number' ? data.amount : 0;
       const category = data.category || 'other';
       
@@ -543,10 +569,10 @@ const TransactionModal = () => {
         amount: amount,
         description: data.description || data.merchant || 'Receipt',
         category: category,
+        walletId: wallet?.value,
         date: data.date ? new Date(data.date) : new Date(),
         image: imageUri
       }));
-      
       setShowFullScreenLoader(false);
       setShowResultModal(true);
       console.log('Receipt data successfully processed and transaction state updated');
@@ -569,161 +595,60 @@ const TransactionModal = () => {
       }
     } finally {
       setIsProcessingReceipt(false);
-    }
-  };
-
-  const handleRetake = () => {
-    setCapturedImage(null);
-    setIsPreviewMode(false);
-  };
-
-  const handleUsePhoto = async () => {
-    if (!capturedImage) {
-      Alert.alert('Error', 'No photo captured');
-      return;
-    }
-
-    setIsProcessingReceipt(true);
-    setProcessingStep('Initializing...');
-    
-    try {
-      console.log('=== RECEIPT PROCESSING WORKFLOW ===');
-      console.log('Starting receipt processing with image:', capturedImage.substring(0, 30) + '...');
-      
-      setProcessingStep('Analyzing receipt...');
-      console.log('Step 1: Sending receipt to processing server');
-      const receiptResult = await processReceipt(capturedImage);
-      console.log('Step 2: Receipt processing result received');
-      console.log('Receipt processing success:', receiptResult.success);
-      
-      if (!receiptResult.success) {
-        console.error('Step 2b: Receipt processing failed:', receiptResult.error);
-        throw new Error(receiptResult.error || 'Failed to process receipt');
-      }
-      
-      console.log('Step 3: Receipt processed successfully');
-      if (receiptResult.data) {
-        console.log('Receipt data:', {
-          merchant: receiptResult.data.merchant,
-          amount: receiptResult.data.amount,
-          date: receiptResult.data.date,
-          category: receiptResult.data.category
-        });
-
-        setReceiptData(receiptResult.data);
-        
-        setTransaction(prev => ({
-          ...prev,
-          amount: receiptResult.data.amount || 0,
-          description: receiptResult.data.description || receiptResult.data.merchant || 'Receipt',
-          category: receiptResult.data.category || 'other',
-          date: receiptResult.data.date ? new Date(receiptResult.data.date) : new Date(),
-        }));
-      }
-      
-      setProcessingStep('Uploading to cloud storage...');
-      console.log('Step 4: Uploading image to cloud storage');
-      const uploadResult: any = await uploadFileToCloudinary(
-        { uri: capturedImage, type: 'image/jpeg' },
-        'Receipt Photos'
-      );
-      
-      console.log('Step 5: Image upload complete');
-      
-      if (!uploadResult.success) {
-        console.error('Step 5b: Image upload failed:', uploadResult.msg);
-        throw new Error(uploadResult.msg || 'Failed to upload image');
-      }
-      
-      console.log('Step 6: Image upload URL:', uploadResult.url);
-      
-      setTransaction(prev => ({
-        ...prev,
-        image: uploadResult.url || capturedImage
-      }));
-
-      // Switch to manual edit mode to let user review and confirm
-      setActiveIndex(0);
-      setIsPreviewMode(false);
       setIsCameraActive(false);
-      
-      // Show confirmation to user
-      Alert.alert(
-        'Receipt Processed Successfully',
-        `We found the following:\n\nMerchant: ${receiptResult.data?.merchant || 'Unknown'}\nAmount: $${receiptResult.data?.amount || 0}\nCategory: ${receiptResult.data?.category || 'Other'}\n\nYou can review and edit the details before saving.`,
-        [
-          { text: 'OK', onPress: () => console.log('Receipt processed') }
-        ]
-      );
-      
-      console.log('=== RECEIPT PROCESSING COMPLETE ===');
-      setIsProcessingReceipt(false);
-      
-    } catch (error) {
-      console.error('=== RECEIPT PROCESSING ERROR ===');
-      console.error('Error processing transaction:', error);
-      
-      // Additional debug info for network errors
-      if (error instanceof Error) {
-        console.error('Error name:', error.name);
-        console.error('Error message:', error.message);
-        console.error('Error stack:', error.stack);
-      }
-      
-      Alert.alert('Error', 'Failed to process transaction. Please try again.');
-      setIsProcessingReceipt(false);
-    } finally {
-      setProcessingStep('');
-      setIsCameraActive(false);
-      setIsPreviewMode(false);
+      setCameraOn(false);
     }
   };
 
   const toggleFlash = () => {
     setIsFlashOn(!isFlashOn);
   };
+// for putting later 
+  // const renderPreviewUI = () => {
+  //   if (!capturedImage) return null;
 
-  const renderPreviewUI = () => {
-    if (!capturedImage) return null;
-
-    return (
-      <View style={styles.previewContainer}>
-        <Image 
-          source={{ uri: capturedImage }} 
-          style={styles.previewImage}
-          resizeMode="contain"
-        />
-        <View style={styles.previewControls}>
-          <TouchableOpacity 
-            style={[styles.previewButton, styles.retakeButton]}
-            onPress={handleRetake}
-            disabled={isProcessingReceipt}
-          >
-            <Icons.ArrowCounterClockwise size={24} color={colors.white} weight="bold" />
-            <Typo size={16} color={colors.white}>Retake</Typo>
-          </TouchableOpacity>
+  //   return (
+  //     <View style={styles.previewContainer}>
+  //       <Image 
+  //         source={{ uri: capturedImage }} 
+  //         style={styles.previewImage}
+  //         resizeMode="contain"
+  //       />
+  //       <View style={styles.previewControls}>
+  //         <TouchableOpacity 
+  //           style={[styles.previewButton, styles.retakeButton]}
+  //           onPress={handleRetake}
+  //           disabled={isProcessingReceipt}
+  //         >
+  //           <Icons.ArrowCounterClockwise size={24} color={colors.white} weight="bold" />
+  //           <Typo size={16} color={colors.white}>Retake</Typo>
+  //         </TouchableOpacity>
           
-          <TouchableOpacity 
-            style={[styles.previewButton, styles.usePhotoButton]}
-            onPress={handleUsePhoto}
-            disabled={isProcessingReceipt}
-          >
-            {isProcessingReceipt ? (
-              <>
-                <Icons.CircleNotch size={24} color={colors.white} weight="bold" />
-                <Typo size={16} color={colors.white}>{processingStep || 'Processing...'}</Typo>
-              </>
-            ) : (
-              <>
-                <Icons.Check size={24} color={colors.white} weight="bold" />
-                <Typo size={16} color={colors.white}>Use Photo</Typo>
-              </>
-            )}
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  };
+  //         <TouchableOpacity 
+  //           style={[styles.previewButton, styles.usePhotoButton]}
+  //           onPress={handleUsePhoto}
+  //           disabled={isProcessingReceipt}
+  //         >
+  //           {isProcessingReceipt ? (
+  //             <>
+  //               <Icons.CircleNotch size={24} color={colors.white} weight="bold" />
+  //               <Typo size={16} color={colors.white}>{processingStep || 'Processing...'}</Typo>
+  //             </>
+  //           ) : (
+  //             <>
+  //               <Icons.Check size={24} color={colors.white} weight="bold" />
+  //               <Typo size={16} color={colors.white}>Use Photo</Typo>
+  //             </>
+  //           )}
+  //         </TouchableOpacity>
+  //       </View>
+  //     </View>
+  //   );
+  // };
+
+      // if (isPreviewMode) {
+    //   return renderPreviewUI();
+    // }
 
   const renderCameraUI = () => {
     if (!permission) {
@@ -752,7 +677,7 @@ const TransactionModal = () => {
             Please enable camera access to use the auto scan feature
           </Typo>
           <Button 
-            onPress={handleCameraPermissionDenied}
+            onPress={requestPermission}
             style={styles.permissionButton}
           >
             <Typo size={16} fontWeight="600" color={colors.white}>
@@ -763,9 +688,7 @@ const TransactionModal = () => {
       );
     }
 
-    if (isPreviewMode) {
-      return renderPreviewUI();
-    }
+
 
     // Display if server is offline --------------------------
     if (!isServerOnline) {
@@ -792,61 +715,125 @@ const TransactionModal = () => {
         </Animated.View>
       );
     }
-
-    return (
-      <Animated.View 
-        style={styles.fullscreenCamera}
-        entering={FadeIn.duration(500)}
-      >
-        <CameraView
-          ref={cameraRef}
-          style={styles.camera}
-          facing={cameraType}
-          enableTorch={isFlashOn}
+    if (!wallet) {
+      return (
+        <Animated.View 
+          style={styles.autoScanContainer}
+          entering={FadeIn.duration(500)}
         >
-          <View style={styles.cameraOverlay}>
-            {/* Todo --- enhance it   */}
-            <Animated.View 
-              style={styles.cameraTopControls}
-              entering={FadeInDown.duration(500).delay(300)}
-            >
-              <TouchableOpacity 
-                style={styles.cameraControlButton}
-                onPress={() => setIsCameraActive(false)}
-              >
-                <Icons.ArrowLeft size={24} color={colors.white} weight="bold" />
-              </TouchableOpacity>
-              
-              <TouchableOpacity 
-                style={styles.cameraControlButton}
-                onPress={toggleFlash}
-              >
-                <Icons.Lightning 
-                  size={24} 
-                  color={isFlashOn ? colors.primary : colors.white} 
-                  weight={isFlashOn ? "fill" : "regular"}
-                />
-              </TouchableOpacity>
-            </Animated.View>
+          <Icons.Wallet size={50} color={colors.primary} weight="thin" />
+    
+          <Typo size={18} color={colors.primary} style={styles.autoScanText}>
+            Set your wallet before adding an expense
+          </Typo>
+    
+          <Typo size={14} color={colors.neutral500} style={styles.autoScanSubtext}>
+            Select a wallet from the list below
+          </Typo>
+    
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Icons.Wallet size={20} color={colors.neutral300} />
+              <Typo size={14} color={colors.neutral300}>Wallet</Typo>
+            </View>
+    
+            <View style={styles.walletList}>
+        {walletOptions.map((item) => (
+          <TouchableOpacity
+            key={item.value}
+            style={[
+              styles.walletItem,
+              // Todo find out why it's giving the red underline while working compleletly fine
+              wallet?.value === item.value && styles.walletItemSelected,
+            ]}
+            onPress={() => {
+              console.log(item)
+              // Todo find out why it's giving the red underline while working compleletly fine
+              setWallet(item)}}
 
-            {/* Center guide hint text */}
-            <Animated.View 
-              style={styles.cameraGuideText}
-              entering={FadeIn.duration(500).delay(200)}
-            >
-              <Typo 
-                size={16} 
-                color={colors.white} 
-                style={{textAlign: 'center'}}
-              >
-                Processing automatically, please hold steady...
+          >
+            <View style={styles.walletItemRow}>
+              <Icons.Wallet size={20} color={colors.white} />
+              <Typo size={16} color={colors.white} style={styles.walletItemText}>
+                {item.label}
               </Typo>
-            </Animated.View>
+            </View>
+          </TouchableOpacity>
+          ))}
+        </View>
           </View>
-        </CameraView>
-      </Animated.View>
-    );
+        </Animated.View>
+      );
+    }
+    
+    setIsCameraActive(true);
+    setCameraOn(true);
   };
+
+  // const FullScreenCamera = () => {
+  //   return (
+  //     <ScreenWrapper>
+  //       <View style={styles.container}>
+  //       <CameraView
+  //         ref={cameraRef}
+  //         style={styles.camera}
+  //         facing={cameraType}
+  //         enableTorch={isFlashOn}
+  //       >
+  //           <View style={styles.overlay}>
+  //             <Animated.View entering={FadeIn.duration(500)} style={styles.scanArea}>
+  //               <View style={styles.cornerTL} />
+  //               <View style={styles.cornerTR} />
+  //               <View style={styles.cornerBL} />
+  //               <View style={styles.cornerBR} />
+  //             </Animated.View>
+  //             <Animated.Text entering={FadeIn.duration(500).delay(300)} style={styles.scanText}>
+  //               Position the receipt within the frame
+  //             </Animated.Text>
+  //           </View>
+  //           <View style={styles.controls}>
+  //             <TouchableOpacity style={styles.controlButton} onPress={() => setFlash(!flash)}>
+  //               <Icons.Flashlight size={24} color={colors.white} weight={flash ? "fill" : "regular"} />
+  //             </TouchableOpacity>
+  //             {!photo && (
+  //               <TouchableOpacity
+  //                 style={[styles.controlButton, styles.captureButton]}
+  //                 onPress={handleScanReceipt}
+  //                 disabled={isLoading}
+  //               >
+  //                 {isLoading ? (
+  //                   <ActivityIndicator color={colors.white} />
+  //                 ) : (
+  //                   <View style={styles.captureButtonInner} />
+  //                 )}
+  //               </TouchableOpacity>
+  //             )}
+  //             <TouchableOpacity
+  //               style={styles.controlButton}
+  //               onPress={() => setFacing(current => (current === 'back' ? 'front' : 'back'))}
+  //             >
+  //               <Icons.CameraRotate size={24} color={colors.white} />
+  //             </TouchableOpacity>
+  //           </View>
+  //         </CameraView>
+  
+  //         {photo && (
+  //           <Animated.View entering={FadeInDown.duration(300)} style={styles.resultContainer}>
+  //             <Text style={styles.resultText}>{isLoading ? 'Processing receipt...' : 'Receipt captured!'}</Text>
+  //             <View style={styles.buttonGroup}>
+  //               <TouchableOpacity style={[styles.button, styles.buttonSecondary]} onPress={handleRetry} disabled={isLoading}>
+  //                 <Text style={[styles.buttonText, styles.buttonTextSecondary]}>Retake</Text>
+  //               </TouchableOpacity>
+  //               <TouchableOpacity style={[styles.button, styles.buttonPrimary]} onPress={() => router.back()} disabled={isLoading}>
+  //                 <Text style={styles.buttonText}>Use Photo</Text>
+  //               </TouchableOpacity>
+  //             </View>
+  //           </Animated.View>
+  //         )}
+  //       </View>
+  //     </ScreenWrapper>
+  //   );
+  // }
 
   const renderFullScreenLoader = () => {
     if (!showFullScreenLoader) return null;
@@ -854,7 +841,7 @@ const TransactionModal = () => {
     return (
       <View style={styles.fullScreenOverlay}>
         <View style={styles.loaderContainer}>
-          <Icons.CircleNotch size={60} color={colors.primary} weight="bold" />
+          <Loading />
           <Typo size={18} color={colors.white} style={styles.loaderText}>
             {processingStep || 'Processing receipt...'}
           </Typo>
@@ -921,6 +908,9 @@ const TransactionModal = () => {
               style={styles.modalButton}
               onPress={() => {
                 setShowResultModal(false);
+                setIsCameraActive(false);
+                // Todo find out why it's giving the red underline while working compleletly fine
+                setWallet(null);
                 
                 setActiveIndex(0); 
               }}
@@ -941,240 +931,315 @@ const TransactionModal = () => {
       </Modal>
     );
   };
-
-  return (
-    <ModalWrapper>
-      <Header 
-        leftIcon={<BackButton />} 
-        title={existTransaction.id ? 'Edit Transaction' : 'New Transaction'}
-        rightIcon={renderHeaderRight()}
-      />
-      
-      <View style={styles.segmentContainer}>
-        <SegmentedControl
-          values={['Manual Entry', 'Auto Scan']}
-          selectedIndex={activeIndex}
-          onChange={handleSegmentChange}
-          tintColor={themeColors.neutral200}
-          appearance={isDarkMode ? 'dark' : 'light'}
-          style={styles.segmentControl}
+  return ( 
+    !isCameraActive || !wallet? (  
+      <ModalWrapper>
+        <Header 
+          leftIcon={<BackButton />} 
+          title={existTransaction.id ? 'Edit Transaction' : 'New Transaction'}
+          rightIcon={renderHeaderRight()}
         />
-      </View>
-      
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-        {activeIndex === 0 ? (
-          <Animated.View style={styles.content} entering={FadeIn.duration(500)} layout={Layout.springify()}>
-            <View style={styles.form}>
-              {/* Transaction Type Selector */}
-              <View style={styles.section}>
-                <View style={styles.sectionHeader}>
-                  <Icons.Wallet size={20} color={colors.neutral300} />
-                  <Typo size={14} color={colors.neutral300}>
-                    Transaction Type
-                  </Typo>
+        
+        <View style={styles.segmentContainer}>
+          <SegmentedControl
+            values={['Manual Entry', 'Auto Scan']}
+            selectedIndex={activeIndex}
+            onChange={handleSegmentChange}
+            tintColor={themeColors.neutral200}
+            appearance={isDarkMode ? 'dark' : 'light'}
+            style={styles.segmentControl}
+          />
+        </View>
+        
+        <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+          {activeIndex === 0 ? (
+            <Animated.View style={styles.content} entering={FadeIn.duration(500)} layout={Layout.springify()}>
+              <View style={styles.form}>
+                {/* Transaction Type Selector */}
+                <View style={styles.section}>
+                  <View style={styles.sectionHeader}>
+                    <Icons.Wallet size={20} color={colors.neutral300} />
+                    <Typo size={14} color={colors.neutral300}>
+                      Transaction Type
+                    </Typo>
+                  </View>
+                  <View style={styles.typeSelector}>
+                    <TouchableOpacity 
+                      style={[
+                        styles.typeOption,
+                        transaction.type === 'expense' && styles.expenseTypeSelected
+                      ]}
+                      onPress={() => setTransaction(prev => ({ ...prev, type: 'expense', category: '' }))}
+                    >
+                      <Icons.ArrowCircleUp size={20} color={transaction.type === 'expense' ? colors.white : colors.rose} />
+                      <Typo color={transaction.type === 'expense' ? colors.white : colors.rose}>Expense</Typo>
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                      style={[
+                        styles.typeOption,
+                        transaction.type === 'income' && styles.incomeTypeSelected
+                      ]}
+                      onPress={() => setTransaction(prev => ({ ...prev, type: 'income', category: '' }))}
+                    >
+                      <Icons.ArrowCircleDown size={20} color={transaction.type === 'income' ? colors.white : colors.green} />
+                      <Typo color={transaction.type === 'income' ? colors.white : colors.green}>Income</Typo>
+                    </TouchableOpacity>
+                  </View>
                 </View>
-                <View style={styles.typeSelector}>
-                  <TouchableOpacity 
-                    style={[
-                      styles.typeOption,
-                      transaction.type === 'expense' && styles.expenseTypeSelected
-                    ]}
-                    onPress={() => setTransaction(prev => ({ ...prev, type: 'expense', category: '' }))}
-                  >
-                    <Icons.ArrowCircleUp size={20} color={transaction.type === 'expense' ? colors.white : colors.rose} />
-                    <Typo color={transaction.type === 'expense' ? colors.white : colors.rose}>Expense</Typo>
-                  </TouchableOpacity>
-                  <TouchableOpacity 
-                    style={[
-                      styles.typeOption,
-                      transaction.type === 'income' && styles.incomeTypeSelected
-                    ]}
-                    onPress={() => setTransaction(prev => ({ ...prev, type: 'income', category: '' }))}
-                  >
-                    <Icons.ArrowCircleDown size={20} color={transaction.type === 'income' ? colors.white : colors.green} />
-                    <Typo color={transaction.type === 'income' ? colors.white : colors.green}>Income</Typo>
-                  </TouchableOpacity>
-                </View>
-              </View>
 
-              {/* Amount Input */}
-              <View style={styles.section}>
-                <View style={styles.sectionHeader}>
-                  <Icons.CurrencyDollar size={20} color={colors.neutral300} />
-                  <Typo size={14} color={colors.neutral300}>Amount</Typo>
-                </View>
-                <Input
-                  placeholder="0.00"
-                  value={transaction.amount.toString()}
-                  onChangeText={text => setTransaction(prev => ({ ...prev, amount: parseFloat(text) || 0 }))}
-                  keyboardType="numeric"
-                  containerStyle={styles.amountInput}
-                  textAlign="center"
-                  selectionColor={colors.primary}
-                />
-              </View>
-
-              {/* Category Selector */}
-              <View style={styles.section}>
-                <View style={styles.sectionHeader}>
-                  <Icons.TagSimple size={20} color={colors.neutral300} />
-                  <Typo size={14} color={colors.neutral300}>Category</Typo>
-                </View>
-                <Dropdown
-                  data={categoryOptions}
-                  labelField="label"
-                  valueField="value"
-                  value={transaction.category}
-                  onChange={item => setTransaction(prev => ({ ...prev, category: item.value }))}
-                  placeholder="Select Category"
-                  style={styles.dropdown}
-                  placeholderStyle={styles.dropdownPlaceholder}
-                  selectedTextStyle={styles.dropdownSelectedText}
-                  containerStyle={styles.dropdownContainer}
-                  activeColor={colors.neutral700}
-                  renderItem={renderItem}
-                  renderLeftIcon={renderLeftIcon}
-                  renderRightIcon={() => (
-                    <Icons.CaretDown 
-                      size={20} 
-                      color={colors.neutral400} 
-                      weight="bold"
-                      style={styles.dropdownIcon} 
-                    />
-                  )}
-                />
-              </View>
-
-              {/* Wallet Selector */}
-              <View style={styles.section}>
-                <View style={styles.sectionHeader}>
-                  <Icons.Wallet size={20} color={colors.neutral300} />
-                  <Typo size={14} color={colors.neutral300}>Wallet</Typo>
-                </View>
-                <Dropdown
-                  data={walletOptions}
-                  labelField="label"
-                  valueField="value"
-                  value={transaction.walletId}
-                  onChange={item => setTransaction(prev => ({ ...prev, walletId: item.value }))}
-                  placeholder="Select Wallet"
-                  style={styles.dropdown}
-                  placeholderStyle={styles.dropdownPlaceholder}
-                  selectedTextStyle={styles.dropdownSelectedText}
-                  containerStyle={styles.dropdownContainer}
-                  activeColor={colors.neutral700}
-                  renderItem={renderItem}
-                  renderLeftIcon={renderLeftIcon}
-                  renderRightIcon={() => (
-                    <Icons.CaretDown 
-                      size={20} 
-                      color={colors.neutral400} 
-                      weight="bold"
-                      style={styles.dropdownIcon} 
-                    />
-                  )}
-                />
-              </View>
-
-              {/* Date Picker */}
-              <View style={styles.section}>
-                <View style={styles.sectionHeader}>
-                  <Icons.Calendar size={20} color={colors.neutral300} />
-                  <Typo size={14} color={colors.neutral300}>Date</Typo>
-                </View>
-                <Pressable 
-                  style={styles.dateButton}
-                  onPress={() => setShowDatePicker(true)}
-                >
-                  <Typo color={colors.white}>
-                    {format(transaction.date as Date, 'MMMM dd, yyyy')}
-                  </Typo>
-                </Pressable>
-                {showDatePicker && (
-                  <DateTimePicker
-                    value={transaction.date as Date}
-                    mode="date"
-                    onChange={handleDateChange}
+                {/* Amount Input */}
+                <View style={styles.section}>
+                  <View style={styles.sectionHeader}>
+                    <Icons.CurrencyDollar size={20} color={colors.neutral300} />
+                    <Typo size={14} color={colors.neutral300}>Amount</Typo>
+                  </View>
+                  <Input
+                    placeholder="0.00"
+                    value={transaction.amount.toString()}
+                    onChangeText={text => setTransaction(prev => ({ ...prev, amount: parseFloat(text) || 0 }))}
+                    keyboardType="numeric"
+                    containerStyle={styles.amountInput}
+                    textAlign="center"
+                    selectionColor={colors.primary}
                   />
-                )}
-              </View>
-
-              {/* Description Input */}
-              <View style={styles.section}>
-                <View style={styles.sectionHeader}>
-                  <Icons.TextT size={20} color={colors.neutral300} />
-                  <Typo size={14} color={colors.neutral300}>Description</Typo>
                 </View>
-                <Input
-                  placeholder="Add a note"
-                  value={transaction.description}
-                  onChangeText={text => setTransaction(prev => ({ ...prev, description: text }))}
-                  containerStyle={styles.descriptionInput}
-                  multiline
-                  numberOfLines={4}
-                />
-              </View>
 
-              {/* Image Upload */}
-              <View style={styles.section}>
-                <View style={styles.sectionHeader}>
-                  <Icons.Image size={20} color={colors.neutral300} />
-                  <Typo size={14} color={colors.neutral300}>Receipt (Optional)</Typo>
+                {/* Category Selector */}
+                <View style={styles.section}>
+                  <View style={styles.sectionHeader}>
+                    <Icons.TagSimple size={20} color={colors.neutral300} />
+                    <Typo size={14} color={colors.neutral300}>Category</Typo>
+                  </View>
+                  <Dropdown
+                    data={categoryOptions}
+                    labelField="label"
+                    valueField="value"
+                    value={transaction.category}
+                    onChange={item => setTransaction(prev => ({ ...prev, category: item.value }))}
+                    placeholder="Select Category"
+                    style={styles.dropdown}
+                    placeholderStyle={styles.dropdownPlaceholder}
+                    selectedTextStyle={styles.dropdownSelectedText}
+                    containerStyle={styles.dropdownContainer}
+                    activeColor={colors.neutral700}
+                    renderItem={renderItem}
+                    renderLeftIcon={renderLeftIcon}
+                    renderRightIcon={() => (
+                      <Icons.CaretDown 
+                        size={20} 
+                        color={colors.neutral400} 
+                        weight="bold"
+                        style={styles.dropdownIcon} 
+                      />
+                    )}
+                  />
                 </View>
-                <ImageUpload 
-                  file={transaction.image} 
-                  onSelect={onPickImage} 
-                  onClear={handleImageClear}
-                />
+
+                {/* Wallet Selector */}
+                <View style={styles.section}>
+                  <View style={styles.sectionHeader}>
+                    <Icons.Wallet size={20} color={colors.neutral300} />
+                    <Typo size={14} color={colors.neutral300}>Wallet</Typo>
+                  </View>
+                  <Dropdown
+                    data={walletOptions}
+                    labelField="label"
+                    valueField="value"
+                    value={transaction.walletId}
+                    onChange={item => setTransaction(prev => ({ ...prev, walletId: item.value }))}
+                    placeholder="Select Wallet"
+                    style={styles.dropdown}
+                    placeholderStyle={styles.dropdownPlaceholder}
+                    selectedTextStyle={styles.dropdownSelectedText}
+                    containerStyle={styles.dropdownContainer}
+                    activeColor={colors.neutral700}
+                    renderItem={renderItem}
+                    renderLeftIcon={renderLeftIcon}
+                    renderRightIcon={() => (
+                      <Icons.CaretDown 
+                        size={20} 
+                        color={colors.neutral400} 
+                        weight="bold"
+                        style={styles.dropdownIcon} 
+                      />
+                    )}
+                  />
+                </View>
+
+                {/* Date Picker */}
+                <View style={styles.section}>
+                  <View style={styles.sectionHeader}>
+                    <Icons.Calendar size={20} color={colors.neutral300} />
+                    <Typo size={14} color={colors.neutral300}>Date</Typo>
+                  </View>
+                  <Pressable 
+                    style={styles.dateButton}
+                    onPress={() => setShowDatePicker(true)}
+                  >
+                    <Typo color={colors.white}>
+                      {format(transaction.date as Date, 'MMMM dd, yyyy')}
+                    </Typo>
+                  </Pressable>
+                  {showDatePicker && (
+                    <DateTimePicker
+                      value={transaction.date as Date}
+                      mode="date"
+                      onChange={handleDateChange}
+                    />
+                  )}
+                </View>
+
+                {/* Description Input */}
+                <View style={styles.section}>
+                  <View style={styles.sectionHeader}>
+                    <Icons.TextT size={20} color={colors.neutral300} />
+                    <Typo size={14} color={colors.neutral300}>Description</Typo>
+                  </View>
+                  <Input
+                    placeholder="Add a note"
+                    value={transaction.description}
+                    onChangeText={text => setTransaction(prev => ({ ...prev, description: text }))}
+                    containerStyle={styles.descriptionInput}
+                    multiline
+                    numberOfLines={4}
+                  />
+                </View>
+
+                {/* Image Upload */}
+                <View style={styles.section}>
+                  <View style={styles.sectionHeader}>
+                    <Icons.Image size={20} color={colors.neutral300} style={{
+                      marginTop:25
+                    }}/>
+                    <Typo size={14} color={colors.neutral300} style={{
+                      marginTop:25
+                    }}>Receipt (Optional)</Typo>
+                  </View>
+                  <ImageUpload 
+                    file={transaction?.image} 
+                    onSelect={onPickImage} 
+                    onClear={handleImageClear}
+                  />
+                </View>
               </View>
-            </View>
-          </Animated.View>
-        ) : (
-          <Animated.View style={styles.content} entering={FadeIn.duration(500)}>
-            {renderCameraUI()}
+            </Animated.View>
+          ) : (
+            <Animated.View style={styles.content} entering={FadeIn.duration(500)}>
+              {renderCameraUI()}
+            </Animated.View>
+          )}
+        </ScrollView>
+
+        {activeIndex === 0 && (
+          <Animated.View 
+            style={styles.footer} 
+            entering={FadeInDown.delay(600)}
+          >
+            <Button 
+              onPress={handleSaveTransaction} 
+              loading={loading}
+              style={styles.saveButton}
+            >
+              <Typo size={16} fontWeight="600" color={colors.white}>
+                {loading ? 'Saving...' : 'Save Transaction'}
+              </Typo>
+            </Button>
           </Animated.View>
         )}
-      </ScrollView>
 
-      {activeIndex === 0 && (
-        <Animated.View 
-          style={styles.footer} 
-          entering={FadeInDown.delay(600)}
-        >
-          <Button 
-            onPress={handleSaveTransaction} 
-            loading={loading}
-            style={styles.saveButton}
+        {activeIndex === 1 && !isCameraActive && (
+          <Animated.View 
+            style={styles.scanButton} 
+            entering={FadeInDown.delay(600)}
           >
-            <Typo size={16} fontWeight="600" color={colors.white}>
-              {loading ? 'Saving...' : 'Save Transaction'}
-            </Typo>
-          </Button>
-        </Animated.View>
-      )}
+            <Button 
+              onPress={handleScanReceipt}
+              style={styles.scanButtonStyle}
+            >
+              <Icons.Camera size={24} color={colors.white} weight="bold" />
+              <Typo size={16} fontWeight="600" color={colors.white}>
+                {isServerOnline ? 'Scan Receipt' : 'Server Offline'}
+              </Typo>
+            </Button>
+          </Animated.View>
+        )} 
+        
+        {/* Render our new components */}
+      </ModalWrapper>
+    ) : (
+      <ScreenWrapper>
+      <View style={styles.container}>
+      <CameraView
+        ref={cameraRef}
+        style={styles.camera}
+        facing={cameraType}
+        enableTorch={isFlashOn}
+      >
+          <View style={styles.overlay}>
+            <Animated.View entering={FadeIn.duration(500)} style={styles.scanArea}>
+              <View style={styles.cornerTL} />
+              <View style={styles.cornerTR} />
+              <View style={styles.cornerBL} />
+              <View style={styles.cornerBR} />
+            </Animated.View>
+            <Animated.Text entering={FadeIn.duration(500).delay(300)} style={styles.scanText}>
+              Position the receipt within the frame
+            </Animated.Text>
+          </View>
+          <View style={styles.controls}>
+            <TouchableOpacity 
+              style={styles.controlButton} 
+              onPress={() => {
+                setIsCameraActive(false);
+                setCameraOn(false);
+                // Todo find out why it's giving the red underline while working compleletly fine
+                setWallet(null);
+              }}
+            >
+              <Icons.X size={24} color={colors.white} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.controlButton, styles.captureButton]}
+              onPress={handleScanReceipt}
+              disabled={isLoading}
+            >
+              {isLoading ? (
+                <ActivityIndicator color={colors.white} />
+              ) : (
+                <View style={styles.captureButtonInner} />
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.controlButton}
+              onPress={toggleFlash}
+            >
+              <Icons.Flashlight 
+                size={24} 
+                color={colors.white} 
+                weight={isFlashOn ? "fill" : "regular"} 
+              />
+            </TouchableOpacity>
+          </View>
+        </CameraView>
 
-      {activeIndex === 1 && !isCameraActive && (
-        <Animated.View 
-          style={styles.scanButton} 
-          entering={FadeInDown.delay(600)}
-        >
-          <Button 
-            onPress={handleScanReceipt}
-            style={styles.scanButtonStyle}
-          >
-            <Icons.Camera size={24} color={colors.white} weight="bold" />
-            <Typo size={16} fontWeight="600" color={colors.white}>
-              {isServerOnline ? 'Scan Receipt' : 'Server Offline'}
-            </Typo>
-          </Button>
-        </Animated.View>
-      )}
-      
-      {/* Render our new components */}
+        {/* {photo && (
+          <Animated.View entering={FadeInDown.duration(300)} style={styles.resultContainer}>
+            <Text style={styles.resultText}>{isLoading ? 'Processing receipt...' : 'Receipt captured!'}</Text>
+            <View style={styles.buttonGroup}>
+              <TouchableOpacity style={[styles.button, styles.buttonSecondary]} onPress={handleRetry} disabled={isLoading}>
+                <Text style={[styles.buttonText, styles.buttonTextSecondary]}>Retake</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.button, styles.buttonPrimary]} onPress={() => router.back()} disabled={isLoading}>
+                <Text style={styles.buttonText}>Use Photo</Text>
+              </TouchableOpacity>
+            </View>
+          </Animated.View>
+        )} */}
+      </View>
       {renderFullScreenLoader()}
       {renderResultModal()}
-      
-    </ModalWrapper>
+    </ScreenWrapper>
+    )
   );
 };
 
@@ -1195,7 +1260,7 @@ const styles = StyleSheet.create({
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacingX._8,
+    gap: spacingX._12,
     marginBottom: spacingY._5,
   },
   typeSelector: {
@@ -1365,9 +1430,6 @@ const styles = StyleSheet.create({
     borderRadius: 0,
     overflow: 'hidden',
   },
-  camera: {
-    flex: 1,
-  },
   cameraOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.2)',
@@ -1379,7 +1441,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: spacingX._20,
     paddingTop: Platform.OS === 'ios' ? 50 : 20,
-    backgroundColor: 'rgba(0,0,0,0.4)',
   },
   cameraControlButton: {
     width: 44,
@@ -1528,6 +1589,205 @@ const styles = StyleSheet.create({
   confirmButton: {
     backgroundColor: colors.primary,
   },
+
+  // New wallet 
+  walletList: {
+    width: '100%',
+    gap: 12,
+  },
+  
+  walletItem: {
+    backgroundColor: colors.neutral800,
+    padding: 16,
+    paddingRight:120,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.neutral700,
+  },
+  
+  walletItemSelected: {
+    borderColor: colors.rose,
+    backgroundColor: colors.rose,
+  },
+  
+  walletItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  
+  walletItemText: {
+    fontWeight: '400',
+  },
+
+
+  // New camera be careful
+
+  container: {
+      flex: 1,
+      backgroundColor: colors.neutral900,
+    },
+    camera: {
+      flex: 1,
+      width: '100%',
+    },
+    overlay: {
+      ...StyleSheet.absoluteFillObject,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    scanArea: {
+      width: SCAN_AREA_SIZE,
+      height: SCAN_AREA_SIZE * 1.4,
+      backgroundColor: 'transparent',
+      borderRadius: 16,
+      position: 'relative',
+    },
+    cornerTL: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      width: 40,
+      height: 40,
+      borderTopWidth: 4,
+      borderLeftWidth: 4,
+      borderColor: colors.primary,
+      borderTopLeftRadius: 16,
+    },
+    cornerTR: {
+      position: 'absolute',
+      top: 0,
+      right: 0,
+      width: 40,
+      height: 40,
+      borderTopWidth: 4,
+      borderRightWidth: 4,
+      borderColor: colors.primary,
+      borderTopRightRadius: 16,
+    },
+    cornerBL: {
+      position: 'absolute',
+      bottom: 0,
+      left: 0,
+      width: 40,
+      height: 40,
+      borderBottomWidth: 4,
+      borderLeftWidth: 4,
+      borderColor: colors.primary,
+      borderBottomLeftRadius: 16,
+    },
+    cornerBR: {
+      position: 'absolute',
+      bottom: 0,
+      right: 0,
+      width: 40,
+      height: 40,
+      borderBottomWidth: 4,
+      borderRightWidth: 4,
+      borderColor: colors.primary,
+      borderBottomRightRadius: 16,
+    },
+    scanText: {
+      color: colors.white,
+      fontSize: scale(16),
+      marginTop: verticalScale(20),
+      textAlign: 'center',
+    },
+    controls: {
+      position: 'absolute',
+      bottom: verticalScale(40),
+      left: 0,
+      right: 0,
+      flexDirection: 'row',
+      justifyContent: 'space-around',
+      alignItems: 'center',
+      paddingHorizontal: scale(20),
+    },
+    controlButton: {
+      width: scale(50),
+      height: scale(50),
+      borderRadius: scale(25),
+      backgroundColor: 'rgba(0,0,0,0.5)',
+      justifyContent: 'center',
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: colors.neutral700,
+    },
+    captureButton: {
+      width: scale(70),
+      height: scale(70),
+      borderRadius: scale(35),
+      backgroundColor: 'rgba(255,255,255,0.3)',
+      borderWidth: 3,
+      borderColor: colors.white,
+    },
+    captureButtonInner: {
+      width: scale(54),
+      height: scale(54),
+      borderRadius: scale(27),
+      backgroundColor: colors.white,
+    },
+    resultContainer: {
+      position: 'absolute',
+      bottom: 0,
+      left: 0,
+      right: 0,
+      backgroundColor: colors.neutral800,
+      padding: scale(20),
+      borderTopLeftRadius: scale(20),
+      borderTopRightRadius: scale(20),
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: -3 },
+      shadowOpacity: 0.25,
+      shadowRadius: 4,
+      elevation: 5,
+    },
+    resultText: {
+      color: colors.white,
+      fontSize: scale(16),
+      marginBottom: verticalScale(15),
+      textAlign: 'center',
+    },
+    buttonGroup: {
+      flexDirection: 'row',
+      gap: scale(10),
+    },
+    button: {
+      flex: 1,
+      padding: scale(15),
+      borderRadius: scale(10),
+      alignItems: 'center',
+    },
+    buttonPrimary: {
+      backgroundColor: colors.primary,
+    },
+    buttonSecondary: {
+      backgroundColor: 'transparent',
+      borderWidth: 1,
+      borderColor: colors.neutral600,
+    },
+    buttonText: {
+      color: colors.white,
+      fontSize: scale(16),
+      fontWeight: 'bold',
+    },
+    buttonTextSecondary: {
+      color: colors.neutral400,
+    },
+    text: {
+      color: colors.white,
+      fontSize: scale(20),
+      fontWeight: 'bold',
+      marginTop: verticalScale(20),
+      marginBottom: verticalScale(10),
+    },
+    subText: {
+      color: colors.neutral400,
+      fontSize: scale(14),
+      textAlign: 'center',
+      marginBottom: verticalScale(20),
+      paddingHorizontal: scale(40),
+    },
 });
 
 export default TransactionModal;

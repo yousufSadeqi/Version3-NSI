@@ -7,6 +7,7 @@ import { colors } from '@/constants/theme';
 const Index = () => {
   const router = useRouter();
 
+  // useless for the moment
   // useEffect(() => {
   //   setTimeout(() => {
   //     router.push('/welcome');  

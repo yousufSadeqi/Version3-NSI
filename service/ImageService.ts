@@ -12,7 +12,10 @@ export const uploadFileToCloudinary = async (
   try {
     // Log the received image asset for debugging
     console.log('Received image asset:', imageAsset);
-
+    if (!imageAsset || typeof imageAsset !== 'object' || !imageAsset.uri) {
+      throw new Error('Invalid image asset format or no image URI');
+    }
+    
     if (!imageAsset?.uri) {
       throw new Error('No image URI provided');
     }

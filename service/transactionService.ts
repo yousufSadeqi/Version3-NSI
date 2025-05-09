@@ -7,67 +7,86 @@ import { scale } from "@/utils/styling";
 import { colors } from "@/constants/theme";
 
 export const createOrUpdateTransaction = async (
-    transactionData: Partial<TransactionType>
+  transactionData: Partial<TransactionType>
 ): Promise<ResponseType> => {
-    try {
-        let { id, type, walletId, amount, image } = transactionData;
-        amount = Number(amount);
+  try {
+      let { id, type, walletId, amount, image } = transactionData;
+      amount = Number(amount);
 
-        if (!amount || amount < 0 || !walletId || !type) {
-            return { success: false, msg: 'Invalid transaction data' };
-        }
+      if (!amount || amount < 0 || !walletId || !type) {
+          return { success: false, msg: 'Invalid transaction data' };
+      }
 
-        if (image) {
-            const imageUploadRes = await uploadFileToCloudinary(image, 'transactions');
-            if (!imageUploadRes.success) {
-                return { success: false, msg: imageUploadRes.msg || 'Failed to upload receipt' };
-            }
-            transactionData.image = imageUploadRes.data;
-        }
+      // Handle the image upload if there's an image to upload
+      if (image) {
+          let imageUrl = null;
 
-        if (id) {
-            // Update existing transaction
-            const existTransactionSnapshot = await getDoc(doc(firestore, 'transactions', id));
-            if (!existTransactionSnapshot.exists()) {
-                return { success: false, msg: 'Transaction not found' };
-            }
+          // Check if image is already a URI string (like 'file://path')
+          if (image && typeof image === 'string' && image.startsWith('file://')) {
+              console.log("Uploading transaction image to Cloudinary...");
+              const uploadResult = await uploadFileToCloudinary({
+                  uri: image,
+                  type: 'image/jpeg',  // Assuming image type is jpeg, change if needed
+              }, "transactions");
 
-            const existTransaction = existTransactionSnapshot.data() as TransactionType;
+              if (!uploadResult.success) {
+                  return { success: false, msg: uploadResult.msg || 'Failed to upload transaction image' };
+              }
 
-            const shouldRevertOriginal = existTransaction.type !== type ||
-                existTransaction.amount !== amount ||
-                existTransaction.walletId !== walletId;
+              imageUrl = uploadResult.data;
+              console.log("Transaction image uploaded successfully:", imageUrl);
+          }
 
-            if (shouldRevertOriginal) {
-                const res = await revertAndUpdateWallets(existTransaction, amount, type, walletId);
-                if (!res.success) return res;
-            }
+          // If the upload was successful, save the URL in the transactionData
+          if (imageUrl) {
+              transactionData.image = imageUrl;
+          }
+      }
 
-            const transactionRef = doc(firestore, 'transactions', id);
-            await updateDoc(transactionRef, {
-                ...transactionData,
-                amount,
-            });
+      if (id) {
+          // Update existing transaction
+          const existTransactionSnapshot = await getDoc(doc(firestore, 'transactions', id));
+          if (!existTransactionSnapshot.exists()) {
+              return { success: false, msg: 'Transaction not found' };
+          }
 
-            return { success: true, data: { ...transactionData, id } };
-        } else {
-            // Create new transaction
-            const res = await updateWalletForNewTransaction(walletId, amount, type);
-            if (!res.success) return res;
+          const existTransaction = existTransactionSnapshot.data() as TransactionType;
 
-            const transactionRef = doc(collection(firestore, 'transactions'));
-            await setDoc(transactionRef, {
-                ...transactionData,
-                amount,
-                createdAt: new Date(),
-            });
+          const shouldRevertOriginal = existTransaction.type !== type ||
+              existTransaction.amount !== amount ||
+              existTransaction.walletId !== walletId;
 
-            return { success: true, data: { ...transactionData, id: transactionRef.id } };
-        }
-    } catch (error: any) {
-        return { success: false, msg: error.message || 'Transaction not successful' };
-    }
+          if (shouldRevertOriginal) {
+              const res = await revertAndUpdateWallets(existTransaction, amount, type, walletId);
+              if (!res.success) return res;
+          }
+
+          const transactionRef = doc(firestore, 'transactions', id);
+          await updateDoc(transactionRef, {
+              ...transactionData,
+              amount,
+          });
+
+          return { success: true, data: { ...transactionData, id } };
+      } else {
+          // Create new transaction
+          const res = await updateWalletForNewTransaction(walletId, amount, type);
+          if (!res.success) return res;
+
+          const transactionRef = doc(collection(firestore, 'transactions'));
+          await setDoc(transactionRef, {
+              ...transactionData,
+              amount,
+              createdAt: new Date(),
+          });
+
+          return { success: true, data: { ...transactionData, id: transactionRef.id } };
+      }
+  } catch (error: any) {
+      return { success: false, msg: error.message || 'Transaction not successful' };
+  }
 };
+
 
 const updateWalletForNewTransaction = async (
     walletId: string,
@@ -486,3 +505,6 @@ export const fetchAnnuallyStats = async (uid: string): Promise<ResponseType> => 
     };
   }
 };
+
+
+// fix the problem of the saving the receipt the problem is that it sends uri like only the uri but the imageServer want to have type: '' and uri''

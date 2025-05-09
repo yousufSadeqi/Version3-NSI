@@ -24,6 +24,7 @@ const Index = () => {
   const { isDarkMode, toggleTheme, themeColors } = useTheme();
   const [activeIndex, setActiveIndex] = useState(0); // <- Segment state
 
+  // useless for the moment
   // const [data, setData] = useState([{}])
 
   // useEffect(() => {

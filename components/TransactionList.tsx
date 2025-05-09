@@ -89,7 +89,7 @@ const TransactionList = ({
 
 const TransactionItem = ({ item, index, handleClick }: TransactionItemProps) => {
   const { themeColors } = useTheme();
-  let category = item?.type === 'income' ? incomeCategory : expenseCategories[item.category!];
+  let category = item?.type === 'income' ? incomeCategory : expenseCategories[item.category!] ;
   const IconComponent = category?.icon || Icons.CreditCard;
 
   const date = (item.date as Timestamp)?.toDate()?.toLocaleDateString('en-GB', {

@@ -5,8 +5,6 @@ import { scale, verticalScale } from '@/utils/styling';
 import ModalWrapper from '@/components/ModalWrapper';
 import Header from '@/components/Header';
 import BackButton from '@/components/BackButton';
-import { Image } from 'expo-image';
-import Typo from '@/components/Typo';
 import Input from '@/components/input';
 import { WalletType } from '@/types';
 import Button from '@/components/Button';
@@ -20,10 +18,7 @@ import { doc, deleteDoc } from 'firebase/firestore';
 import { firestore } from '@/config/firebase';
 import Animated, { 
   FadeIn, 
-  FadeOut, 
-  SlideInDown,
   Layout,
-  BounceIn,
   FadeInDown
 } from 'react-native-reanimated';
 import * as Icons from 'phosphor-react-native'

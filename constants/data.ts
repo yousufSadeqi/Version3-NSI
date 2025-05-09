@@ -69,6 +69,12 @@ export const expenseCategories: ExpenseCategoriesType = {
     icon: Icons.UserCircle,
     bgColor: "#a21caf",
   },
+  shopping: {
+    label: "Shopping",  
+    value: "shopping",
+    icon: Icons.ShoppingBag,  
+    bgColor: "#D97706",  
+  },
   others: {
     label: "Others",
     value: "others",

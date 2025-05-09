@@ -595,6 +595,13 @@ def create_description(text, merchant, amount, date, items):
 @app.route('/process-receipt', methods=['POST', 'OPTIONS'])
 def process_receipt():
     '''
+    Processes receipt images to extract structured information.
+    
+    Accepts:
+        POST request with JSON payload containing 'image_url'
+        
+    Returns:
+        JSON response with extracted receipt data or error message
     '''
     if request.method == 'OPTIONS':
         return '', 200
@@ -608,7 +615,6 @@ def process_receipt():
 
         logger.info(f"Received image input: {image_url[:30]}...")
         
-        # Handle base64 images directly
         if image_url.startswith('data:image'):
             try:
                 header, base64_data = image_url.split(',', 1)
@@ -617,26 +623,21 @@ def process_receipt():
                 logger.error(f"Failed to decode base64 image: {e}")
                 return jsonify({'success': False, 'error': 'Invalid base64 image data'}), 400
         else:  
-            # Download image from URL
             logger.info("Received URL. Downloading image...")
             image_data = download_image(image_url)
             if not image_data:
                 return jsonify({'success': False, 'error': 'Image download failed'}), 400
 
-        # Convert image data to OpenCV format
         image_array = np.asarray(bytearray(image_data.read()), dtype=np.uint8)
         image = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
         if image is None:
             return jsonify({'success': False, 'error': 'Image decoding failed'}), 400
 
-        # Process the image and extract text
         processed_image = preprocess_image(image)
         extracted_text = extract_text(processed_image)
         
-        # Parse receipt information
         items = parse_items(extracted_text)
 
-        # Parse total and safely convert to float
         raw_amount = parse_total(extracted_text)
         try:
             amount = float(raw_amount.replace(',', '.')) if raw_amount else 0
@@ -645,15 +646,12 @@ def process_receipt():
             amount = 0
         
         if amount <= 0:
-            # Try alternative preprocessing if amount not found
             logger.info("Attempting alternative image processing for amount detection")
-            # Try higher contrast version of the image
             gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
             clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
             enhanced = clahe.apply(gray)
             _, high_contrast = cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
             
-            # Try to extract text again with the enhanced image
             alt_text = extract_text(high_contrast)
             raw_amount = parse_total(alt_text)
             if raw_amount:
@@ -747,5 +745,126 @@ def process_receipt():
         logger.error(f"Processing error: {e}")
         return jsonify({'success': False, 'error': str(e), 'serverStatus': 'online'}), 500
 
+
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    test_image_url = 'https://lh3.googleusercontent.com/N-l6cgC5WAwkszmIh2rFsHte58ccLQswRFsRI3iDpzjbeac4X8CguA3WIUlDpSyJ_FmLJ5shsXLa5gzJD_gzFdqPMbo=w512-rw' 
+
+    test_payload = {
+        'image_url': test_image_url
+    }
+
+    try:
+        image_url = test_payload.get('image_url')
+
+        if not image_url:
+            print({'success': False, 'error': 'No image_url provided'})
+        else:
+            print(f"Received image input: {image_url[:30]}...")
+            if image_url.startswith('data:image'):
+                try:
+                    header, base64_data = image_url.split(',', 1)
+                    image_data = BytesIO(b64decode(base64_data))
+                except Exception as e:
+                    print({'success': False, 'error': f'Invalid base64 image data: {e}'})
+            else:
+                print("Received non-base64 URL. Attempting download...")
+                image_data = download_image(image_url)
+                if not image_data:
+                    print({'success': False, 'error': 'Image download failed'})
+                    exit()
+
+            image_array = np.asarray(bytearray(image_data.read()), dtype=np.uint8)
+            image = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
+            if image is None:
+                print({'success': False, 'error': 'Image decoding failed'})
+                exit()
+
+            processed = preprocess_image(image)
+            text = extract_text(processed)
+            items = parse_items(text)
+            realText = extract_text(image)
+            if parse_total(text):
+                raw_amount = parse_total(text)
+            else:
+                raw_amount = parse_total(realText)
+
+            if raw_amount :
+                amount = float(raw_amount.replace(',', '.'))
+            else:
+                amount = 0 
+            
+            merchant_categories = {
+            "food": [
+                "mcdonald's", "kfc", "subway", "starbucks", "burger king", "domino's", "pizza hut",
+                "dunkin", "tim hortons", "chick-fil-a", "taco bell", "five guys", "wendy's", "popeyes"
+            ],
+            "groceries": [
+                "walmart", "costco", "aldi", "lidl", "tesco", "carrefour", "target", "sainsbury's",
+                "asda", "waitrose", "morrisons", "safeway", "kroger", "publix", "whole foods", "trader joe's",
+                "big bazaar", "reliance fresh", "dmart", "spencer's", "more", "star bazaar", "no frills"
+            ],
+            "shopping": [
+                "amazon", "flipkart", "ebay", "best buy", "ikea", "macy's", "nordstrom", "jcpenney", "kohl's",
+                "bloomingdale's", "argos", "marks & spencer", "nykaa", "myntra", "canadian tire", "big w", "kmart"
+            ],
+            "transport": [
+                "uber", "lyft", "bolt", "grab", "ola", "didi", "blablacar", "careem", "metro transit", "gojek"
+            ],
+            "utilities": [
+                "con edison", "pacific gas & electric", "british gas", "edf", "enel", "national grid",
+                "hydro one", "e.on", "dominion energy", "xcel energy"
+            ],
+            "entertainment": [
+                "netflix", "spotify", "apple music", "hulu", "disney+", "amazon prime video", "youtube premium",
+                "amc theatres", "cinemark", "regal", "xbox", "playstation store", "steam"
+            ],
+            "health": [
+                "cvs", "walgreens", "rite aid", "boots", "superdrug", "shoppers drug mart", "guardian", "watsons",
+                "london drugs"
+            ],
+            "education": [
+                "coursera", "udemy", "khan academy", "edx", "linkedin learning", "skillshare", "duolingo"
+            ],
+            "travel": [
+                "expedia", "booking.com", "airbnb", "agoda", "trip.com", "trivago", "skyscanner", "delta", "emirates",
+                "united airlines", "air france", "qatar airways", "marriott", "hilton"
+            ],
+            "services": [
+                "fiverr", "upwork", "freelancer", "godaddy", "bluehost", "shopify", "squarespace", "wix",
+                "mailchimp", "canva"
+            ]
+        }
+
+            date = parse_date(text)
+            merchant = parse_title(text)
+            category = determine_category(merchant, items)
+            description = create_description(text, merchant, amount, date, items)
+
+            if category == "others":
+                for key, value in merchant_categories.items():
+                    # The reason behind the nested loop is that the parse_title might detect more a word
+                    for known in value:
+                        if known in merchant.lower():
+                            category = key
+                            break
+                    # it stop the second we find the category so it didn't go all the way
+                    if category != "others":
+                        break
+
+            response_data = {
+                'success': True,
+                'data': {
+                    'merchant': merchant,
+                    'amount': amount,
+                    'date': date,
+                    'description': description,
+                    'category': category,
+                    'raw_text': text,
+                    'items': items
+                }
+            }
+            print(response_data)
+
+
+    except Exception as e:
+        print({'success': False, 'error': str(e), 'serverStatus': 'offline'})

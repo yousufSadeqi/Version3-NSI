@@ -40,7 +40,7 @@ const Profile = () => {
         {
           icon: <Icons.Bell size={22} color={themeColors.text} weight="fill" />,
           label: 'Notifications',
-          route: '/(modals)/notificationsModal',
+          route: '/(modals)/cameraScanner',
         },
       ],
     },
