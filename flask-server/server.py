@@ -1,6 +1,7 @@
 import cv2
-import pytesseract
 import re
+# new OCR be carefull read full documentation about it 
+import easyocr 
 import numpy as np
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -11,6 +12,9 @@ import socket
 from urllib.parse import urlparse
 from datetime import datetime
 from base64 import b64decode
+
+# since I am trying for french receipt 
+easyocr_reader = easyocr.Reader(['fr'], gpu=False)
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {
@@ -23,7 +27,6 @@ CORS(app, resources={r"/*": {
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 
 @app.route('/')
 def home():
@@ -41,7 +44,7 @@ def health_check():
         'server_status': 'online',
         'server_ip': socket.gethostbyname(socket.gethostname()),
         'client_ip': request.remote_addr,
-        'tesseract_status': 'available' if pytesseract.get_tesseract_version() else 'unavailable'
+        # 'tesseract_status': 'available' if pytesseract.get_tesseract_version() else 'unavailable'
     })
 
 def download_image(url):
@@ -54,18 +57,11 @@ def download_image(url):
     '''
     try:
         logger.info(f"Attempting to download image from URL: {url}")
-    
-        # encode en base64
+        
         if url.startswith('data:image'):
-            logger.info("Detected base64 image data")
             base64_data = url.split(',')[1]
-            return BytesIO(requests.utils.base64_to_bytes(base64_data))
+            return BytesIO(b64decode(base64_data))
 
-        parsed_url = urlparse(url)
-        if not parsed_url.scheme:
-            url = 'https://' + url
-            
-        # telecharge l'image qui de cloudinary
         response = requests.get(url)
         if response.status_code == 200:
             logger.info(f"Image downloaded successfully: {response.headers.get('Content-Type')}")
@@ -73,28 +69,31 @@ def download_image(url):
         else:
             logger.error(f"Failed to download image. Status code: {response.status_code}")
             return None
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
         logger.error(f"Error downloading image: {e}")
         return None
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}")
+        return None
 
-def preprocess_image(image):
-    '''
-    Cette fonction ameliore la qualité de l'image pour meilleurs resultats d'OCR.
-    Paramètres:
-        image (numpy.ndarray): Image d'entré au format BGR
-    Sortie:
-        numpy.ndarray: Image binaire traité et utilisé pour l'extraction de texte
-    '''
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    gray = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_LINEAR)
-    gray = cv2.fastNlMeansDenoising(gray, h=30)
+# def preprocess_image(image):
+#     '''
+#     Cette fonction ameliore la qualité de l'image pour meilleurs resultats d'OCR.
+#     Paramètres:
+#         image (numpy.ndarray): Image d'entré au format BGR
+#     Sortie:
+#         numpy.ndarray: Image binaire traité et utilisé pour l'extraction de texte
+#     '''
+#     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+#     gray = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_LINEAR)
+#     gray = cv2.fastNlMeansDenoising(gray, h=30)
     
-    # Appliquer un seuil adaptatif pour gerer les variation illumination
-    thresh = cv2.adaptiveThreshold(
-        gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 2
-    )
+#     # Appliquer un seuil adaptatif pour gerer les variation illumination
+#     thresh = cv2.adaptiveThreshold(
+#         gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 2
+#     )
     
-    return thresh
+#     return thresh
 
 def extract_text(image):
     """
@@ -108,12 +107,25 @@ def extract_text(image):
         pour meilleurs resultats
     """
     # Configure Tesseract for best results with receipt images
-    custom_config = r'--oem 1 --psm 1'  # LSTM engine with automatic page segmentation
+    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    results = easyocr_reader.readtext(image_rgb)
+
+    # Rebuild the text with line and word positions to maintain formatting
+    formatted_text = ""
+    last_bottom = None  # To track the last bottom of the line for detecting new lines
+
+    for result in results:
+        text = result[1]
+        (top_left, top_right, bottom_right, bottom_left) = result[0]
+        
+        # Check if the text block is on a new line based on its vertical position (bottom of the previous block)
+        if last_bottom and top_left[1] > last_bottom:
+            formatted_text += "\n"  # Add a newline if the current block is on a new line
+        
+        formatted_text += text + " "
+        last_bottom = bottom_left[1]  # Update last bottom with current block's bottom
     
-    # Perform OCR
-    text = pytesseract.image_to_string(image, config=custom_config)
-    
-    return text
+    return formatted_text
 
 def detect_receipt_language(text):
     '''
@@ -195,14 +207,14 @@ def determine_category(merchant, items):
         'taxi', 'uber', 'lyft', 'transport', 'bus', 'train', 'plane', 'flight', 'ride-sharing', 'car rental', 
         'subway', 'tram', 'ferry', 'bike rental', 'car hire', 'transportation', 'cab', 'chauffeur', 'shuttle', 
         'scooter', 'chauffeur privé', 'transport public', 'métro', 'train de banlieue', 'tramway', 'vélo', 
-        'location de voiture', 'covoiturage', 'location de scooter', 'taxi collectif', 'moto-taxi'
+        'location de voiture', 'covoiturage', 'location de scooter', 'taxi collectif', 'moto-taxi', 'trum'
     ],
     'utilities': [
         'electric', 'water', 'gas', 'utility', 'electricity bill', 'water bill', 'gas bill', 'internet', 
         'mobile bill', 'telephone bill', 'sewer', 'cable bill', 'wifi', 'broadband', 'heating', 'cooling', 
         'electricity', 'public service', 'consommation d\'électricité', 'facture d\'eau', 'facture de gaz', 
         'facture de téléphone', 'facture d\'internet', 'facture d\'électricité', 'chauffage', 'climatisation',
-        'services publics', 'gaz naturel', 'internet haut débit', 'facture internet', 'service public'
+        'services publics', 'gaz naturel', 'internet haut débit', 'facture internet', 'service public', 'tabac'
     ],
     'entertainment': [
         'cinema', 'movie', 'theater', 'concert', 'show', 'performance', 'sports', 'music', 'event', 'festival', 
@@ -407,6 +419,7 @@ def parse_total(text):
     return str(total)
 
 
+
 def parse_date(text):
     '''
     cette fonction extrait la date à partir du texte et elle cherche des lignes contenant le mot 'date' ou des formats de date avec '/'
@@ -414,19 +427,29 @@ def parse_date(text):
         text (str): Le texte
     Sortie:
         str: La date extraite ou None si on trouve pas la date
-    '''
-    lines = text.split("\n")
-    date = None
 
-    for line in lines:
-        line = line.strip()
-        words = line.split()
-        if len(words) >= 2:
-            if 'date' in ''.join(words).upper() or '/' in ''.join(words):
-                for word in words:
-                    if word in 'date':
-                        date = word
-    return date
+    Exlication du code: 
+        Pourquoi j'ai utilise formats, datetime.striptime:
+        formats: je défini ici un list de formats de date courants 
+        datetime: je essaie de convertir le mot en objet datetime parce que si je le fais pas il va envoyer une error a react native 
+        j'ai quand meme essayer de faire autrement vous pouvez regarde en Manual testing page.py comme je sais que j'ai pas le droit de 
+        utiliser ce genre de chose
+
+    '''
+    words = text.split()
+
+    formats = ["%d/%m/%Y", "%d-%m-%Y", "%d/%m/%y", "%d-%m-%y"]
+
+    for word in words:
+        for fmt in formats:
+            try:
+                date_obj = datetime.strptime(word, fmt)
+
+                formatted_date = date_obj.strftime("%Y-%m-%d")
+                return formatted_date
+            except ValueError:
+                continue
+    return None
 
 def parse_title(text):
     '''
@@ -435,6 +458,8 @@ def parse_title(text):
         text (str) : Le texte
     Sortie :
         str : Le nom du magasin ou "Unknown Merchant" si on le trouve pas.
+    Exlication pour le variable know_merchants: 
+        tout les entreprise que j'ai mets ici je les ai pris sur internet parce que je sais pas beaucoup entreprise commune parmi eux
     '''
     known_merchants = [
     # Global/International
@@ -490,7 +515,8 @@ def parse_title(text):
     "reçu", "ticket", "facture", "date", "heure", "paiement", "especes",
     "espèces", "carte", "montant", "remise", "remboursement", "code", "annulation",
     "merci", "visite", "siret", "numéro", "adresse", "produits", "net", "brut",
-    "total", "sous-total", "net à payer", "à payer", "cb", "remerciements", "resto",
+    "total", "sous-total", "net à payer", "à payer", "cb", "remerciements", "resto", 'Info' ,
+     'Vente', 'Information', 'information vente'
     ]
 
     lines = text.split("\n")
@@ -595,6 +621,7 @@ def create_description(text, merchant, amount, date, items):
 @app.route('/process-receipt', methods=['POST', 'OPTIONS'])
 def process_receipt():
     '''
+    documentation
     '''
     if request.method == 'OPTIONS':
         return '', 200
@@ -628,10 +655,8 @@ def process_receipt():
         image = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
         if image is None:
             return jsonify({'success': False, 'error': 'Image decoding failed'}), 400
-
-        # Process the image and extract text
-        processed_image = preprocess_image(image)
-        extracted_text = extract_text(processed_image)
+        
+        extracted_text = extract_text(image)
         
         # Parse receipt information
         items = parse_items(extracted_text)
@@ -734,12 +759,12 @@ def process_receipt():
                 'items': items
             }
         }
-
+        logger.info(extracted_text)
         # Check if we have valid amount, otherwise indicate error
         if amount <= 0:
             logger.warning("Receipt amount could not be determined")
             return jsonify({'success': False, 'error': 'Receipt amount could not be determined. Please try again with a clearer image.'}), 400
-
+        
         logger.info("Receipt processing complete")
         return jsonify(response_data)
 

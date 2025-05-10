@@ -539,7 +539,7 @@ const TransactionModal = () => {
     try {
       console.log('Starting receipt processing with image:', imageUri.substring(0, 30) + '...');
       
-      const timeoutDuration = 30000; //////////////30 secs 
+      const timeoutDuration = 30000; //////////////30 secs todo/ make a function that base on the user device higher or lower the time
       let processingTimedOut = false;
       
       const timeoutId = setTimeout(() => {
@@ -894,12 +894,19 @@ const TransactionModal = () => {
                 {receiptData?.date ? format(new Date(receiptData.date), 'MMMM dd, yyyy') : 'Today'}
               </Typo>
             </View>
+
+
             
             <View style={styles.resultRow}>
               <Typo size={14} color={colors.neutral400}>Category</Typo>
               <Typo size={16} color={colors.white} style={{textTransform: 'capitalize'}}>
                 {receiptData?.category || 'Other'}
               </Typo>
+            </View>
+
+            <View style={styles.resultRow}>
+              <Typo size={14} color={colors.neutral400}>Description</Typo>
+              <Typo size={16} color={colors.white}>{receiptData?.description || 'Unknown'}</Typo>
             </View>
           </View>
           

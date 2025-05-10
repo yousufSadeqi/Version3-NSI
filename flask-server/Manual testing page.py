@@ -5,6 +5,7 @@ import numpy as np
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import logging
+import easyocr
 import requests
 from io import BytesIO
 import socket
@@ -12,6 +13,7 @@ from urllib.parse import urlparse
 from datetime import datetime
 from base64 import b64decode
 
+easyocr_reader = easyocr.Reader(['fr'], gpu=False)
 app = Flask(__name__)
 CORS(app, resources={r"/*": {
     "origins": "*",
@@ -77,24 +79,28 @@ def download_image(url):
         logger.error(f"Error downloading image: {e}")
         return None
 
-def preprocess_image(image):
-    '''
-    Cette fonction ameliore la qualité de l'image pour meilleurs resultats d'OCR.
-    Paramètres:
-        image (numpy.ndarray): Image d'entré au format BGR
-    Sortie:
-        numpy.ndarray: Image binaire traité et utilisé pour l'extraction de texte
-    '''
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    gray = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_LINEAR)
-    gray = cv2.fastNlMeansDenoising(gray, h=30)
-    
-    # Appliquer un seuil adaptatif pour gerer les variation illumination
-    thresh = cv2.adaptiveThreshold(
-        gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 2
-    )
-    
-    return thresh
+# def preprocess_image(image):
+#     # 1. Convert to grayscale
+#     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+#     # 2. Resize to improve small text recognition
+#     gray = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_LINEAR)
+
+#     # 3. Apply bilateral filter to reduce noise while preserving edges
+#     gray = cv2.bilateralFilter(gray, d=9, sigmaColor=75, sigmaSpace=75)
+
+#     # 4. Adaptive thresholding (better for uneven lighting than Otsu)
+#     thresh = cv2.adaptiveThreshold(gray, 255,
+#                                    cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+#                                    cv2.THRESH_BINARY,
+#                                    blockSize=31, C=10)
+
+#     # 5. Morphological operations to close small holes inside text
+#     kernel = np.ones((1, 1), np.uint8)
+#     thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+
+#     return thresh
+
 
 def extract_text(image):
     """
@@ -108,13 +114,25 @@ def extract_text(image):
         pour meilleurs resultats
     """
     # Configure Tesseract for best results with receipt images
-    custom_config = r'--oem 1 --psm 1'  # LSTM engine with automatic page segmentation
-    
-    # Perform OCR
-    text = pytesseract.image_to_string(image, config=custom_config)
-    
-    return text
+    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    results = easyocr_reader.readtext(image_rgb)
 
+    # Rebuild the text with line and word positions to maintain formatting
+    formatted_text = ""
+    last_bottom = None  # To track the last bottom of the line for detecting new lines
+
+    for result in results:
+        text = result[1]
+        (top_left, top_right, bottom_right, bottom_left) = result[0]
+        
+        # Check if the text block is on a new line based on its vertical position (bottom of the previous block)
+        if last_bottom and top_left[1] > last_bottom:
+            formatted_text += "\n"  # Add a newline if the current block is on a new line
+        
+        formatted_text += text + " "
+        last_bottom = bottom_left[1]  # Update last bottom with current block's bottom
+    
+    return formatted_text
 def detect_receipt_language(text):
     '''
     Cette fonction detects si le reçu est en français ou en anglais en utilisant des mots clés
@@ -595,13 +613,6 @@ def create_description(text, merchant, amount, date, items):
 @app.route('/process-receipt', methods=['POST', 'OPTIONS'])
 def process_receipt():
     '''
-    Processes receipt images to extract structured information.
-    
-    Accepts:
-        POST request with JSON payload containing 'image_url'
-        
-    Returns:
-        JSON response with extracted receipt data or error message
     '''
     if request.method == 'OPTIONS':
         return '', 200
@@ -633,8 +644,9 @@ def process_receipt():
         if image is None:
             return jsonify({'success': False, 'error': 'Image decoding failed'}), 400
 
-        processed_image = preprocess_image(image)
-        extracted_text = extract_text(processed_image)
+        # useless with easyOCR
+        # processed_image = preprocess_image(image)
+        extracted_text = extract_text(image)
         
         items = parse_items(extracted_text)
 
@@ -675,7 +687,8 @@ def process_receipt():
                 "bloomingdale's", "argos", "marks & spencer", "nykaa", "myntra", "canadian tire", "big w", "kmart"
             ],
             "transport": [
-                "uber", "lyft", "bolt", "grab", "ola", "didi", "blablacar", "careem", "metro transit", "gojek"
+                "uber", "lyft", "bolt", "grab", "ola", "didi", "blablacar", "careem", "metro transit", "gojek", 'voyage' , 
+                'tao' , 'snfc'
             ],
             "utilities": [
                 "con edison", "pacific gas & electric", "british gas", "edf", "enel", "national grid",
@@ -733,7 +746,6 @@ def process_receipt():
             }
         }
 
-        # Check if we have valid amount, otherwise indicate error
         if amount <= 0:
             logger.warning("Receipt amount could not be determined")
             return jsonify({'success': False, 'error': 'Receipt amount could not be determined. Please try again with a clearer image.'}), 400
@@ -747,8 +759,8 @@ def process_receipt():
 
 
 if __name__ == '__main__':
-    test_image_url = 'https://lh3.googleusercontent.com/N-l6cgC5WAwkszmIh2rFsHte58ccLQswRFsRI3iDpzjbeac4X8CguA3WIUlDpSyJ_FmLJ5shsXLa5gzJD_gzFdqPMbo=w512-rw' 
-
+    test_image_url1 = 'https://res.cloudinary.com/dcijqmjst/image/upload/v1746830264/Receipt%20Photos/x7zn4c92atdtukyxscjq.jpg'
+    test_image_url = 'http://res.cloudinary.com/dcijqmjst/image/upload/v1746889047/Receipt%20Photos/fb5k102a7fh7mxenyyfv.jpg'
     test_payload = {
         'image_url': test_image_url
     }
@@ -779,8 +791,8 @@ if __name__ == '__main__':
                 print({'success': False, 'error': 'Image decoding failed'})
                 exit()
 
-            processed = preprocess_image(image)
-            text = extract_text(processed)
+            # processed = preprocess_image(image)
+            text = extract_text(image)
             items = parse_items(text)
             realText = extract_text(image)
             if parse_total(text):
@@ -864,6 +876,9 @@ if __name__ == '__main__':
                 }
             }
             print(response_data)
+            print(extract_text(image))
+            # print(extract_text(preprocess_image(image)))
+            
 
 
     except Exception as e:
