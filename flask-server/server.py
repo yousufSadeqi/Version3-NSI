@@ -12,6 +12,7 @@ import socket
 from urllib.parse import urlparse
 from datetime import datetime
 from base64 import b64decode
+from dateutil import parser
 
 # since I am trying for french receipt 
 easyocr_reader = easyocr.Reader(['fr'], gpu=False)
@@ -360,10 +361,16 @@ def parse_total(text):
         'BALANCE DUE', 'TOTAL PAID', 'TOTAL PRICE', 'A PAYER', 'NET A PAYER'
     ]
 
+    # Stronger indicators to short-circuit and return immediately
+    definite_indicators = [
+        'TOTAL A PAYER', 'GRAND TOTAL', 'TOTAL DUE', 'MONTANT DÛ',
+        'AMOUNT TO PAY', 'NET A PAYER', 'SOMME A PAYER'
+    ]
+
     def is_amount_candidate(s):
         dot_count = 0
         for ch in s:
-            if ch >= '0' and ch <= '9':
+            if '0' <= ch <= '9':  # Check if the character is a digit
                 continue
             elif ch == '.':
                 dot_count += 1
@@ -371,52 +378,69 @@ def parse_total(text):
                 return False
         return dot_count <= 1 and len(s) > 0
 
-    # Chercher toutes les valeurs connecté au total
     for line in lines:
         clean_line = line.strip()
         upper_line = clean_line.upper()
 
-        found = False
+        for indicator in definite_indicators:
+            if indicator in upper_line:
+                # Check if number exists on the same line
+                words = clean_line.split()
+                for word in words:
+                    temp = ""
+                    for ch in word:
+                        if ch == ',':
+                            temp += '.'
+                        elif ch not in '$€£':
+                            temp += ch
+
+                    if len(temp) > 0 and '0' <= temp[0] <= '9':  # Check if the first character is a digit
+                        num_str = ""
+                        for ch in temp:
+                            if '0' <= ch <= '9' or ch == '.':
+                                num_str += ch
+                        if is_amount_candidate(num_str):
+                            val = float(num_str)
+                            if val > 0:
+                                return str(val)  # Return immediately if strong match found
+
+        # Fallback to general total indicators
         for indicator in amount_indicators:
             if indicator in upper_line:
-                found = True
-                break
+                words = clean_line.split()
+                for word in words:
+                    temp = ""
+                    for ch in word:
+                        if ch == ',':
+                            temp += '.'
+                        elif ch not in '$€£':
+                            temp += ch
 
-        if found:
-            words = clean_line.split()
-            for word in words:
-                temp = ""
-                for ch in word:
-                    if ch == ',':
-                        temp += '.'
-                    elif ch not in '$€£':
-                        temp += ch
+                    if len(temp) > 0 and '0' <= temp[0] <= '9':  # Check if the first character is a digit
+                        num_str = ""
+                        for ch in temp:
+                            if '0' <= ch <= '9' or ch == '.' or ch == ',':
+                                num_str += ch
+                        if is_amount_candidate(num_str):
+                            val = float(num_str)
+                            if val > 0:
+                                total_candidates.append(val)
 
-                if len(temp) > 0 and temp[0] >= '0' and temp[0] <= '9':
-                    num_str = ""
-                    for ch in temp:
-                        if (ch >= '0' and ch <= '9') or ch == '.':
-                            num_str += ch
-                    if is_amount_candidate(num_str):
-                        val = float(num_str)
-                        if val > 0:
-                            total_candidates.append(val)
+    if total_candidates:
+        # Find the maximum value manually
+        max_val = total_candidates[0]
+        for val in total_candidates[1:]:
+            if val > max_val:
+                max_val = val
+        return str(max_val)
 
-    # Choisir la plus grande valeur si des candidats sont trouvés
-    if len(total_candidates) > 0:
-        largest = total_candidates[0]
-        for val in total_candidates:
-            if val > largest:
-                largest = val
-        return str(largest)
-
-    # si il y a acune total dont on compte les prix qui est dans le parse_items(text) et on le renvoit en str()
+    # Fallback if nothing is found
     items = parse_items(text)
-    total = 0.0
+    total = 0
     for item in items:
         total += item['price']
-
     return str(total)
+
 
 
 
@@ -436,19 +460,27 @@ def parse_date(text):
         utiliser ce genre de chose
 
     '''
-    words = text.split()
+    date_patterns = [
+        r'\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b',         # Ex : 11/03/2023, 11-03-23, 11.03.2023
+        r'\b\d{4}[./-]\d{1,2}[./-]\d{1,2}\b',           # Ex : 2023/03/11, 2023.03.11
+        r'\b\d{1,2}\s+\w+\s+\d{4}\b',                  # Ex : 11 mars 2023
+        r'\b\w+\s+\d{1,2},\s+\d{4}\b',                 # Ex : March 11, 2023
+    ]
 
-    formats = ["%d/%m/%Y", "%d-%m-%Y", "%d/%m/%y", "%d-%m-%y"]
-
-    for word in words:
-        for fmt in formats:
-            try:
-                date_obj = datetime.strptime(word, fmt)
-
-                formatted_date = date_obj.strftime("%Y-%m-%d")
-                return formatted_date
-            except ValueError:
-                continue
+    lines = text.split('\n')  # Divise le texte en lignes pour une recherche ligne par ligne
+    for line in lines:
+        line = line.strip()   # Supprime les espaces en début et fin de ligne
+        for pattern in date_patterns:
+            # Recherche un motif de date dans la ligne
+            match = re.search(pattern, line, flags=re.IGNORECASE)
+            if match:
+                try:
+                    # Tente de parser la date détectée, en supposant que le jour vient avant le mois
+                    date_obj = parser.parse(match.group(), dayfirst=True)
+                    return date_obj.date().isoformat()  # Convertit en format 'YYYY-MM-DD'
+                except Exception as e:
+                    # Si le parsing échoue, on ignore cette correspondance
+                    continue
     return None
 
 def parse_title(text):
@@ -608,7 +640,7 @@ def create_description(text, merchant, amount, date, items):
             description += " on " + date
         else:
             description += " with unknown date"
-        if items and len(items) > 0:
+        if items and len(valid_items) > 0:
             description += ". Items detected:"
             for item in items:
                 description += " - " + item["name"] + ": $" + str(item["price"])
@@ -755,6 +787,7 @@ def process_receipt():
                 'date': date,
                 'description': description,
                 'category': category,
+                # c'est pas utile d'envoie ça en Frontend pour l'instant parce que j'ai pas cree une place pour l'utiliser en Frontend
                 'raw_text': extracted_text,
                 'items': items
             }

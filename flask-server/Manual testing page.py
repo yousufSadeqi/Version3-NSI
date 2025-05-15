@@ -279,14 +279,18 @@ def determine_category(merchant, items):
 
     return 'others'
 
+import re
+
 def parse_items(text):
     '''
-    Cette fonction extrait les articles et leurs prix du texte du ticket de caisse elle aussi ignore les lignes comme le total les taxes, et 
-    les informations inutiles a cause de blacklist
-    Parametres:
+    Cette fonction extrait les articles et leurs prix du texte du ticket de caisse. Elle ignore les lignes comme les totaux, les taxes,
+    et les informations inutiles via une blacklist. Elle gère aussi les prix en double (unité x quantité) et les lignes avec deux montants.
+    
+    Paramètres:
         text (str): Le texte brut extrait de l'image du ticket 
+        
     Sortie:
-        list: Liste de dictionnaires chaque dictionnaire contient le nom de l'article et son prix
+        list: Liste de dictionnaires, chaque dictionnaire contient le nom de l'article et son prix
     '''
     lines = text.split("\n")
     items = []
@@ -298,55 +302,62 @@ def parse_items(text):
         "server", "table", "terminal", "store", "address", "phone", "email", "date", "time", "website",
         "thanks", "welcome", "visit again", "signature", "customer copy", "merchant copy", "restapayer",
         "tva", "payer", "paid", "ref", "voucher", "gift", "promo", "return", "ticket", "ticket #", "item",
-        "due", "savings", "loyalty", "bonus", "conditions", "policy"
+        "due", "savings", "loyalty", "bonus", "conditions", "policy", "articles"
     ]
-
-    def is_all_digits(s):
-        for c in s:
-            if c < '0' or c > '9':
-                return False
-        return True
 
     def contains_blacklist_word(s):
         s_lower = s.lower()
-        for b in blacklist:
-            if b in s_lower:
-                return True
-        return False
+        return any(b in s_lower for b in blacklist)
+
+    def extract_price_candidates(line):
+        # Replace comma with dot for decimals
+        line = line.replace(",", ".")
+        # Match prices like 3.99, 10.50, 1.99x2, etc.
+        return re.findall(r'\d+\.\d{2}(?:x\d+)?', line)
 
     for line in lines:
         line_clean = line.strip()
-        if not line_clean or len(line_clean) < 4:
+        if not line_clean or len(line_clean) < 4 or contains_blacklist_word(line_clean):
             continue
 
-        words = line_clean.split()
-        if len(words) < 2:
+        prices = extract_price_candidates(line_clean)
+
+        if not prices:
             continue
 
-        # Attempt to extract price from the last word on the line
-        last = words[-1].replace(",", ".").replace("€", "").replace("$", "").replace("£", "").strip(" .")
-        num_part = last.replace('.', '')
+        # Choose the last price as the most likely total price
+        last_price = prices[-1]
 
-        if last.count('.') > 1 or not is_all_digits(num_part):
-            continue
+        # Handle quantity multiplier like 1.99x2
+        if 'x' in last_price:
+            try:
+                unit_price, qty = map(float, last_price.split('x'))
+                price = round(unit_price * qty, 2)
+            except:
+                continue
+        else:
+            try:
+                price = float(last_price)
+            except:
+                continue
 
-        try:
-            price = float(last)
-        except:
-            continue
+        # Remove price part from the line to isolate the name
+        name_part = line_clean.replace(last_price, "").strip()
 
-        # Extract item name from the remaining words
-        name_parts = []
-        for w in words[:-1]:
-            if not is_all_digits(w) and len(w) > 1:
-                name_parts.append(w)
+        # Clean up name: remove any trailing standalone numbers or quantities
+        name_tokens = []
+        for word in name_part.split():
+            if re.match(r"^\d+[a-zA-Z]*$", word):
+                continue
+            name_tokens.append(word)
 
-        name = ' '.join(name_parts).strip()
+        name = " ".join(name_tokens)
 
         if name and not contains_blacklist_word(name):
             items.append({'name': name, 'price': price})
 
     return items
+
 
 def parse_total(text):
     '''
@@ -366,6 +377,12 @@ def parse_total(text):
         'BALANCE DUE', 'TOTAL PAID', 'TOTAL PRICE', 'A PAYER', 'NET A PAYER'
     ]
 
+    # Stronger indicators to short-circuit and return immediately
+    definite_indicators = [
+        'TOTAL A PAYER', 'GRAND TOTAL', 'TOTAL DUE', 'MONTANT DÛ',
+        'AMOUNT TO PAY', 'NET A PAYER', 'SOMME A PAYER'
+    ]
+
     def is_amount_candidate(s):
         dot_count = 0
         for ch in s:
@@ -377,52 +394,56 @@ def parse_total(text):
                 return False
         return dot_count <= 1 and len(s) > 0
 
-    # Chercher toutes les valeurs connecté au total
     for line in lines:
         clean_line = line.strip()
         upper_line = clean_line.upper()
 
-        found = False
+        for indicator in definite_indicators:
+            if indicator in upper_line:
+                # Check if number exists on the same line
+                words = clean_line.split()
+                for word in words:
+                    temp = ""
+                    for ch in word:
+                        if ch == ',':
+                            temp += '.'
+                        elif ch not in '$€£':
+                            temp += ch
+
+                    if len(temp) > 0 and temp[0].isdigit():
+                        num_str = "".join([ch for ch in temp if ch.isdigit() or ch == '.'])
+                        if is_amount_candidate(num_str):
+                            val = float(num_str)
+                            if val > 0:
+                                return str(val)  # Return immediately if strong match found
+
+        # Fallback to general total indicators
         for indicator in amount_indicators:
             if indicator in upper_line:
-                found = True
-                break
+                words = clean_line.split()
+                for word in words:
+                    temp = ""
+                    for ch in word:
+                        if ch == ',':
+                            temp += '.'
+                        elif ch not in '$€£':
+                            temp += ch
 
-        if found:
-            words = clean_line.split()
-            for word in words:
-                temp = ""
-                for ch in word:
-                    if ch == ',':
-                        temp += '.'
-                    elif ch not in '$€£':
-                        temp += ch
+                    if len(temp) > 0 and temp[0].isdigit():
+                        num_str = "".join([ch for ch in temp if ch.isdigit() or ch == '.'])
+                        if is_amount_candidate(num_str):
+                            val = float(num_str)
+                            if val > 0:
+                                total_candidates.append(val)
 
-                if len(temp) > 0 and temp[0] >= '0' and temp[0] <= '9':
-                    num_str = ""
-                    for ch in temp:
-                        if (ch >= '0' and ch <= '9') or ch == '.':
-                            num_str += ch
-                    if is_amount_candidate(num_str):
-                        val = float(num_str)
-                        if val > 0:
-                            total_candidates.append(val)
+    if total_candidates:
+        return str(max(total_candidates))
 
-    # Choisir la plus grande valeur si des candidats sont trouvés
-    if len(total_candidates) > 0:
-        largest = total_candidates[0]
-        for val in total_candidates:
-            if val > largest:
-                largest = val
-        return str(largest)
-
-    # si il y a acune total dont on compte les prix qui est dans le parse_items(text) et on le renvoit en str()
+    # Fallback if nothing is found
     items = parse_items(text)
-    total = 0.0
-    for item in items:
-        total += item['price']
-
+    total = sum(item['price'] for item in items)
     return str(total)
+
 
 
 def parse_date(text):
@@ -760,7 +781,7 @@ def process_receipt():
 
 if __name__ == '__main__':
     test_image_url1 = 'https://res.cloudinary.com/dcijqmjst/image/upload/v1746830264/Receipt%20Photos/x7zn4c92atdtukyxscjq.jpg'
-    test_image_url = 'http://res.cloudinary.com/dcijqmjst/image/upload/v1746889047/Receipt%20Photos/fb5k102a7fh7mxenyyfv.jpg'
+    test_image_url = 'https://res.cloudinary.com/dcijqmjst/image/upload/v1747162840/Receipt%20Photos/a03pdhwkcptpagboi8du.jpg'
     test_payload = {
         'image_url': test_image_url
     }
