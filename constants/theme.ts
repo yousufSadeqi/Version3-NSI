@@ -70,6 +70,7 @@ export const spacingY = {
   _3: 3,
   _5: 5,
   _7: 7,
+  _8: 8,
   _10: 10,
   _12: 12,
   _15: 15,
@@ -95,13 +96,14 @@ export const radius = {
 export const lightTheme = {
   text: colors.neutral900,
   textSecondary: colors.neutral600,
-  background: colors.white,
-  surface: colors.neutral50,
-  border: colors.neutral200,
+  background: colors.neutral100,
+  surface: colors.neutral200,
+  surfaceVariant: colors.neutral300,
+  border: colors.neutral300,
   primary: colors.primary,
-  neutral100: colors.neutral100,
-  neutral200: colors.neutral200,
-  neutral300: colors.neutral300,
+  neutral100: colors.neutral200,
+  neutral200: colors.neutral300,
+  neutral300: colors.neutral400,
 };
 
 export const darkTheme = {

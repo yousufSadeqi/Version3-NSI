@@ -36,7 +36,6 @@ import { uploadFileToCloudinary } from '@/service/ImageService';
 import { ENDPOINTS } from '@/config/api';
 import Modal from 'react-native-modal';
 import Loading from '@/components/loading';
-import CameraScanner from './cameraScanner';
 import ScreenWrapper from '@/components/ScreenWrapper';
 
 // Camera Dimensision Full screen
@@ -390,14 +389,23 @@ const TransactionModal = () => {
   };
 
   const handleDateChange = (event: any, selectedDate?: Date) => {
-    if (Platform.OS === 'android') {
+    const isAndroid = Platform.OS === 'android';
+
+    if (isAndroid) {
+      if (event.type === 'set' && selectedDate) {
+        setTransaction(prev => ({ ...prev, date: selectedDate }));
+      }
+      // Always close the picker on Android
       setShowDatePicker(false);
-    }
-    
-    if (selectedDate) {
-      setTransaction(prev => ({ ...prev, date: selectedDate }));
+    } else {
+      // iOS: updates live as user scrolls
+      if (selectedDate) {
+        setTransaction(prev => ({ ...prev, date: selectedDate }));
+      }
     }
   };
+
+
 
   const handleSegmentChange = (event: any) => {
     setActiveIndex(event.nativeEvent.selectedSegmentIndex);
@@ -539,7 +547,7 @@ const TransactionModal = () => {
     try {
       console.log('Starting receipt processing with image:', imageUri.substring(0, 30) + '...');
       
-      const timeoutDuration = 30000; //////////////30 secs todo/ make a function that base on the user device higher or lower the time
+      const timeoutDuration = 120000; //////////////60 secs todo/ make a function that base on the user device higher or lower the time
       let processingTimedOut = false;
       
       const timeoutId = setTimeout(() => {
@@ -769,71 +777,6 @@ const TransactionModal = () => {
     setIsCameraActive(true);
     setCameraOn(true);
   };
-
-  // const FullScreenCamera = () => {
-  //   return (
-  //     <ScreenWrapper>
-  //       <View style={styles.container}>
-  //       <CameraView
-  //         ref={cameraRef}
-  //         style={styles.camera}
-  //         facing={cameraType}
-  //         enableTorch={isFlashOn}
-  //       >
-  //           <View style={styles.overlay}>
-  //             <Animated.View entering={FadeIn.duration(500)} style={styles.scanArea}>
-  //               <View style={styles.cornerTL} />
-  //               <View style={styles.cornerTR} />
-  //               <View style={styles.cornerBL} />
-  //               <View style={styles.cornerBR} />
-  //             </Animated.View>
-  //             <Animated.Text entering={FadeIn.duration(500).delay(300)} style={styles.scanText}>
-  //               Position the receipt within the frame
-  //             </Animated.Text>
-  //           </View>
-  //           <View style={styles.controls}>
-  //             <TouchableOpacity style={styles.controlButton} onPress={() => setFlash(!flash)}>
-  //               <Icons.Flashlight size={24} color={colors.white} weight={flash ? "fill" : "regular"} />
-  //             </TouchableOpacity>
-  //             {!photo && (
-  //               <TouchableOpacity
-  //                 style={[styles.controlButton, styles.captureButton]}
-  //                 onPress={handleScanReceipt}
-  //                 disabled={isLoading}
-  //               >
-  //                 {isLoading ? (
-  //                   <ActivityIndicator color={colors.white} />
-  //                 ) : (
-  //                   <View style={styles.captureButtonInner} />
-  //                 )}
-  //               </TouchableOpacity>
-  //             )}
-  //             <TouchableOpacity
-  //               style={styles.controlButton}
-  //               onPress={() => setFacing(current => (current === 'back' ? 'front' : 'back'))}
-  //             >
-  //               <Icons.CameraRotate size={24} color={colors.white} />
-  //             </TouchableOpacity>
-  //           </View>
-  //         </CameraView>
-  
-  //         {photo && (
-  //           <Animated.View entering={FadeInDown.duration(300)} style={styles.resultContainer}>
-  //             <Text style={styles.resultText}>{isLoading ? 'Processing receipt...' : 'Receipt captured!'}</Text>
-  //             <View style={styles.buttonGroup}>
-  //               <TouchableOpacity style={[styles.button, styles.buttonSecondary]} onPress={handleRetry} disabled={isLoading}>
-  //                 <Text style={[styles.buttonText, styles.buttonTextSecondary]}>Retake</Text>
-  //               </TouchableOpacity>
-  //               <TouchableOpacity style={[styles.button, styles.buttonPrimary]} onPress={() => router.back()} disabled={isLoading}>
-  //                 <Text style={styles.buttonText}>Use Photo</Text>
-  //               </TouchableOpacity>
-  //             </View>
-  //           </Animated.View>
-  //         )}
-  //       </View>
-  //     </ScreenWrapper>
-  //   );
-  // }
 
   const renderFullScreenLoader = () => {
     if (!showFullScreenLoader) return null;
@@ -1091,6 +1034,7 @@ const TransactionModal = () => {
                     <DateTimePicker
                       value={transaction.date as Date}
                       mode="date"
+                      display='default'
                       onChange={handleDateChange}
                     />
                   )}

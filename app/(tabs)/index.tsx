@@ -16,6 +16,7 @@ import * as Icons from 'phosphor-react-native';
 import TransactionList from '@/components/TransactionList';
 import { useTheme } from '@/contexts/themeContext';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
+import { Alert } from 'react-native';
 
 const Index = () => {
   const router = useRouter();
@@ -37,6 +38,13 @@ const Index = () => {
   //     }
   //   )
   // })
+// only checking connection with the AWS 
+  // useEffect(() => {
+  //     fetch("http://54.205.67.188:5000/ping")
+  //       .then(res => res.json())
+  //       .then(data => Alert.alert("Response", data.message))
+  //       .catch(err => Alert.alert("Error", err.message));
+  // }, []); 
 
   if (!user) {
     router.replace('/welcome');
@@ -147,7 +155,9 @@ const Index = () => {
               values={['All', 'Income', 'Expense']}
               selectedIndex={activeIndex}
               onChange={handleSegmentChange}
-              tintColor={themeColors.neutral200}
+              backgroundColor={themeColors.surface}
+              fontStyle={{color: themeColors.text }}
+              tintColor={themeColors.primary}
               appearance={isDarkMode ? 'dark' : 'light'}
             />
           </View>
