@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, StyleSheet, Pressable, Text, Dimensions } from 'react-native';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs/lib/typescript/src/types';
 import { colors, radius, spacingY } from '@/constants/theme';
@@ -14,6 +14,10 @@ import Animated, {
   withDelay,
   Easing
 } from 'react-native-reanimated';
+import useFetchData from '@/hooks/useFetchData';
+import { useAuth } from '@/contexts/authContext';
+import { where } from 'firebase/firestore';
+import CustomAlert from './CustomAlert';
 
 type TabRoute = {
   key: string;
@@ -27,6 +31,11 @@ export function CustomTabs({ state, descriptors, navigation }: BottomTabBarProps
   const buttonScale = useSharedValue(1);
   const buttonRotation = useSharedValue(0);
   const glowOpacity = useSharedValue(0);
+  const { user } = useAuth();
+  const { data: wallets, loading } = useFetchData('Wallets', [
+    where('uid', '==', user?.uid)
+  ]);
+  const [showNoWalletAlert, setShowNoWalletAlert] = useState(false);
 
     
 
@@ -131,6 +140,10 @@ export function CustomTabs({ state, descriptors, navigation }: BottomTabBarProps
             );
             
             setTimeout(() => {
+              if (!loading && (!wallets || wallets.length === 0)) {
+                setShowNoWalletAlert(true);
+                return;
+              }
               navigation.navigate('(modals)/transactionModal');
             }, 250);
           }}
@@ -168,6 +181,17 @@ export function CustomTabs({ state, descriptors, navigation }: BottomTabBarProps
   return (
     <View style={styles.container}>
       {renderFloatingButton()}
+      <CustomAlert
+        visible={showNoWalletAlert}
+        title="No Wallet Found"
+        message="Please add a wallet before making a transaction."
+        type="warning"
+        onClose={() => setShowNoWalletAlert(false)}
+        onConfirm={() => {
+          setShowNoWalletAlert(false);
+          navigation.navigate('(modals)/WalletModal');
+        }}
+      />
       <View style={styles.tabBar}>
         {renderTabIndicator()}
         {state.routes.map((route: TabRoute, index: number) => {
