@@ -318,7 +318,6 @@ def parse_items(text):
         if len(words) < 2:
             continue
 
-        # Attempt to extract price from the last word on the line
         last = words[-1].replace(",", ".").replace("€", "").replace("$", "").replace("£", "").strip(" .")
         num_part = last.replace('.', '')
 
@@ -330,7 +329,6 @@ def parse_items(text):
         except:
             continue
 
-        # Extract item name from the remaining words
         name_parts = []
         for w in words[:-1]:
             if not is_all_digits(w) and len(w) > 1:
@@ -361,7 +359,7 @@ def parse_total(text):
         'BALANCE DUE', 'TOTAL PAID', 'TOTAL PRICE', 'A PAYER', 'NET A PAYER'
     ]
 
-    # Stronger indicators to short-circuit and return immediately
+    # indicators plus forts pour une court complexite et revoie immediatement
     definite_indicators = [
         'TOTAL A PAYER', 'GRAND TOTAL', 'TOTAL DUE', 'MONTANT DÛ',
         'AMOUNT TO PAY', 'NET A PAYER', 'SOMME A PAYER'
@@ -370,7 +368,7 @@ def parse_total(text):
     def is_amount_candidate(s):
         dot_count = 0
         for ch in s:
-            if '0' <= ch <= '9':  # Check if the character is a digit
+            if '0' <= ch <= '9':  # verifie si c'est un nombre
                 continue
             elif ch == '.':
                 dot_count += 1
@@ -384,7 +382,7 @@ def parse_total(text):
 
         for indicator in definite_indicators:
             if indicator in upper_line:
-                # Check if number exists on the same line
+                line_values = []
                 words = clean_line.split()
                 for word in words:
                     temp = ""
@@ -394,7 +392,7 @@ def parse_total(text):
                         elif ch not in '$€£':
                             temp += ch
 
-                    if len(temp) > 0 and '0' <= temp[0] <= '9':  # Check if the first character is a digit
+                    if len(temp) > 0 and '0' <= temp[0] <= '9':
                         num_str = ""
                         for ch in temp:
                             if '0' <= ch <= '9' or ch == '.':
@@ -402,9 +400,11 @@ def parse_total(text):
                         if is_amount_candidate(num_str):
                             val = float(num_str)
                             if val > 0:
-                                return str(val)  # Return immediately if strong match found
+                                line_values.append(val)
+                # la raison pour la quelle on renvoie pas la premiere valuer est peut etre aura on autre nombre que total dans ticket
+                if line_values:
+                    return str(max(line_values))
 
-        # Fallback to general total indicators
         for indicator in amount_indicators:
             if indicator in upper_line:
                 words = clean_line.split()
@@ -416,7 +416,7 @@ def parse_total(text):
                         elif ch not in '$€£':
                             temp += ch
 
-                    if len(temp) > 0 and '0' <= temp[0] <= '9':  # Check if the first character is a digit
+                    if len(temp) > 0 and '0' <= temp[0] <= '9':  # verifie si c'est un nombre ou non
                         num_str = ""
                         for ch in temp:
                             if '0' <= ch <= '9' or ch == '.' or ch == ',':
@@ -427,22 +427,19 @@ def parse_total(text):
                                 total_candidates.append(val)
 
     if total_candidates:
-        # Find the maximum value manually
+        # trouve le maximum valeur autrement
         max_val = total_candidates[0]
         for val in total_candidates[1:]:
             if val > max_val:
                 max_val = val
         return str(max_val)
 
-    # Fallback if nothing is found
+    # si on trouve rien 
     items = parse_items(text)
     total = 0
     for item in items:
         total += item['price']
     return str(total)
-
-
-
 
 def parse_date(text):
     '''
@@ -457,8 +454,7 @@ def parse_date(text):
         formats: je défini ici un list de formats de date courants 
         datetime: je essaie de convertir le mot en objet datetime parce que si je le fais pas il va envoyer une error a react native 
         j'ai quand meme essayer de faire autrement vous pouvez regarde en Manual testing page.py comme je sais que j'ai pas le droit de 
-        utiliser ce genre de chose
-
+        utiliser ce genre de chose mais ca ne marche pas bien comme je n'ai pas utiliser ces patterns 
     '''
     date_patterns = [
         r'\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b',         # Ex : 11/03/2023, 11-03-23, 11.03.2023
@@ -469,17 +465,17 @@ def parse_date(text):
 
     lines = text.split('\n')  # Divise le texte en lignes pour une recherche ligne par ligne
     for line in lines:
-        line = line.strip()   # Supprime les espaces en début et fin de ligne
+        line = line.strip()   # Supprime les espaces en debut et fin de ligne
         for pattern in date_patterns:
             # Recherche un motif de date dans la ligne
             match = re.search(pattern, line, flags=re.IGNORECASE)
             if match:
                 try:
-                    # Tente de parser la date détectée, en supposant que le jour vient avant le mois
+                    # Tente de parser la date detecté, en supposant que le jour vient avant le mois
                     date_obj = parser.parse(match.group(), dayfirst=True)
-                    return date_obj.date().isoformat()  # Convertit en format 'YYYY-MM-DD'
+                    return date_obj.date().isoformat()  # Converti en format 'YYYY-MM-DD'
                 except Exception as e:
-                    # Si le parsing échoue, on ignore cette correspondance
+                    # Si le parsing echoue on ignore 
                     continue
     return None
 
@@ -652,9 +648,45 @@ def create_description(text, merchant, amount, date, items):
 
 @app.route('/process-receipt', methods=['POST', 'OPTIONS'])
 def process_receipt():
-    '''
-    documentation
-    '''
+    """
+    cette function est point de terminaison pour traiter une image de recu et extraire les informations de transaction et accepte
+    des images encodés en base64 ou des URLs d'images. Elle utilise la reconnaissance 
+    Optical Character Recognition (OCR) pour extraire le texte du recu, puis analyse ce texte en utilisant les functions :
+        - parse_date()
+        - parse_title()
+        - parse_total()
+        - parse_items()
+        - determine_category()
+        - create_description()
+    Sortie :
+        - 200 OK : En cas de succès, renvoie un JSON(JavaScript Object Notation) avec les données structurées du recu :
+            {
+                "success": True,
+                "data": {
+                    "merchant": str,
+                    "amount": float,
+                    "date": str ou None,
+                    "description": str,
+                    "category": str,
+                    "raw_text": str,
+                    "items": liste de str
+                }
+            }
+
+        - 400 Bad Request : Si l'URL de l'image est manquante, invalide, ou si le traitement echou :
+            {
+                "success": False,
+                "error": str
+            }
+
+        - 500 Internal Server Error : En cas d'erreur inattendue côté serveur :
+            {
+                "success": False,
+                "error": str,
+                "serverStatus": "online"
+            }
+    """
+
     if request.method == 'OPTIONS':
         return '', 200
 
@@ -667,7 +699,7 @@ def process_receipt():
 
         logger.info(f"Received image input: {image_url[:30]}...")
         
-        # Handle base64 images directly
+        # Gerer directement les images base64 
         if image_url.startswith('data:image'):
             try:
                 header, base64_data = image_url.split(',', 1)
@@ -676,13 +708,13 @@ def process_receipt():
                 logger.error(f"Failed to decode base64 image: {e}")
                 return jsonify({'success': False, 'error': 'Invalid base64 image data'}), 400
         else:  
-            # Download image from URL
+            # telecharger l'image
             logger.info("Received URL. Downloading image...")
             image_data = download_image(image_url)
             if not image_data:
                 return jsonify({'success': False, 'error': 'Image download failed'}), 400
 
-        # Convert image data to OpenCV format
+        # converti l'image en format OpenCv
         image_array = np.asarray(bytearray(image_data.read()), dtype=np.uint8)
         image = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
         if image is None:
@@ -690,27 +722,27 @@ def process_receipt():
         
         extracted_text = extract_text(image)
         
-        # Parse receipt information
+        # obtenir les element d'achet
         items = parse_items(extracted_text)
 
-        # Parse total and safely convert to float
+        #trouver la totale 
         raw_amount = parse_total(extracted_text)
         try:
             amount = float(raw_amount.replace(',', '.')) if raw_amount else 0
         except ValueError:
             logger.warning(f"Could not parse amount: {raw_amount}")
             amount = 0
-        
+
+        # si on ne trouve pas la totale 
         if amount <= 0:
-            # Try alternative preprocessing if amount not found
             logger.info("Attempting alternative image processing for amount detection")
-            # Try higher contrast version of the image
+            # le plus haut contrast version de l'image
             gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
             clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
             enhanced = clahe.apply(gray)
             _, high_contrast = cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
             
-            # Try to extract text again with the enhanced image
+            # Essayer de extract le text avec une bonne condition 
             alt_text = extract_text(high_contrast)
             raw_amount = parse_total(alt_text)
             if raw_amount:
@@ -718,7 +750,7 @@ def process_receipt():
             else:
                 amount = 0
 
-        # Final check for the category detector
+        # Finale verification pour detecter le category
         merchant_categories = {
             "food": [
                 "mcdonald's", "kfc", "subway", "starbucks", "burger king", "domino's", "pizza hut",
@@ -767,15 +799,14 @@ def process_receipt():
         category = determine_category(merchant, items)
         description = create_description(extracted_text, merchant, amount, date, items)
 
-        # .lower() cause I used the function title() that automatically make the first letter captical 
         if category == "others":
             for key, value in merchant_categories.items():
-                # The reason behind the nested loop is that the parse_title might detect more a word
+                # la raison pour nested loop est que parse_categories peut etre trouve plus que une mot
                 for known in value:
                     if known in merchant.lower():
                         category = key
                         break
-                    # it stop the second we find the category so it didn't go all the way
+                    #il s'arrete des il trouve comme on ne va pas jusqu'a la fin de boucle
                 if category != "others":
                     break
 
@@ -793,7 +824,7 @@ def process_receipt():
             }
         }
         logger.info(extracted_text)
-        # Check if we have valid amount, otherwise indicate error
+        # verifie si on a un amount valid sinon renvoie une error
         if amount <= 0:
             logger.warning("Receipt amount could not be determined")
             return jsonify({'success': False, 'error': 'Receipt amount could not be determined. Please try again with a clearer image.'}), 400

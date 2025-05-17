@@ -5,6 +5,7 @@ import Typo from './Typo';
 import * as icon from 'phosphor-react-native';
 import { verticalScale } from '@/utils/styling';
 import Animated, { FadeIn, FadeOut, ZoomIn, ZoomOut } from 'react-native-reanimated';
+import ScreenWrapper from './ScreenWrapper';
 
 interface CustomAlertProps {
     visible: boolean;
@@ -55,6 +56,7 @@ const CustomAlert: React.FC<CustomAlertProps> = ({
     };
 
     return (
+        <ScreenWrapper>
         <Modal transparent visible={visible} animationType="fade" statusBarTranslucent>
             <View style={styles.overlay}>
                 <Pressable style={styles.overlayBackground} onPress={onClose} />
@@ -97,6 +99,7 @@ const CustomAlert: React.FC<CustomAlertProps> = ({
                 </Animated.View>
             </View>
         </Modal>
+        </ScreenWrapper>
     );
 };
 

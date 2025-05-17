@@ -28,7 +28,7 @@ export function CustomTabs({ state, descriptors, navigation }: BottomTabBarProps
   const buttonRotation = useSharedValue(0);
   const glowOpacity = useSharedValue(0);
 
-  
+    
 
   useEffect(() => {
     const pulseAnimation = () => {

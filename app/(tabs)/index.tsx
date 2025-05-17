@@ -16,7 +16,7 @@ import * as Icons from 'phosphor-react-native';
 import TransactionList from '@/components/TransactionList';
 import { useTheme } from '@/contexts/themeContext';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
-import { Alert } from 'react-native';
+import { Alert } from 'react-native';      
 
 const Index = () => {
   const router = useRouter();

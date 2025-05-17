@@ -366,10 +366,6 @@ const TransactionModal = () => {
     );
   };
 
-  // const renderDropdownIcon = () => (
-  //   <Icons.CaretDown size={20} color={colors.neutral300} weight="bold" />
-  // );
-
   const renderLeftIcon = (visible?: boolean) => {
     const selectedCategory = categoryOptions.find(cat => cat.value === transaction.category);
     return selectedCategory?.icon?.() || null;
@@ -547,7 +543,7 @@ const TransactionModal = () => {
     try {
       console.log('Starting receipt processing with image:', imageUri.substring(0, 30) + '...');
       
-      const timeoutDuration = 120000; //////////////60 secs todo/ make a function that base on the user device higher or lower the time
+      const timeoutDuration = 120000; //////////////120 secs todo/ make a function that base on the user device higher or lower the time
       let processingTimedOut = false;
       
       const timeoutId = setTimeout(() => {
@@ -869,13 +865,21 @@ const TransactionModal = () => {
               <Typo size={16} color={colors.white}>Modify</Typo>
               </TouchableOpacity>
             
-            <TouchableOpacity 
-              style={[styles.modalButton, styles.confirmButton]}
-              onPress={handleSaveTransaction}
-            >
-              <Icons.Check size={20} color={colors.white} weight="bold" />
-              <Typo size={16} color={colors.white}>Confirm</Typo>
-            </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.modalButton, styles.confirmButton]}
+                onPress={handleSaveTransaction}
+                disabled={loading} // Prevent multiple taps while loading
+              >
+                <Typo size={16} color={colors.white}>
+                  {loading ? 'Loading...' : (
+                    <>
+                      <Icons.Check size={20} color={colors.white} weight="bold" /> Confirm
+                    </>
+                  )}
+                </Typo>
+              </TouchableOpacity>
+
+
           </View>
         </View>
       </Modal>
@@ -1172,7 +1176,7 @@ const TransactionModal = () => {
             </TouchableOpacity>
           </View>
         </CameraView>
-
+        {/* it's a bad idea but for now maybe I will use it in the future */}
         {/* {photo && (
           <Animated.View entering={FadeInDown.duration(300)} style={styles.resultContainer}>
             <Text style={styles.resultText}>{isLoading ? 'Processing receipt...' : 'Receipt captured!'}</Text>

@@ -105,8 +105,8 @@ export const processReceipt = async (imageUri: string): Promise<ReceiptProcessin
         items: Array.isArray(result.data.items) ? result.data.items : [],
       };
 
-      // this is not essential anymore but I can use it some other time cause I already made a clean description in backend(python)
-      // but we can still use it if somehow the description isn't there 
+      // this is not essential anymore but I can use it cause in frontend I don't have enough space to show all the items
+      // so I am gonna take the descript that I already made in the backend(python) here I don't use items
       if (!cleanedData.description) {
         const { merchant, amount, date, items } = cleanedData;
 
@@ -118,16 +118,6 @@ export const processReceipt = async (imageUri: string): Promise<ReceiptProcessin
 
         if (date) {
           description += ` on ${date}`;
-        }
-
-        if (Array.isArray(items) && items.length > 0) {
-          const itemList = items
-            .filter(item => item.name && typeof item.price === 'number')
-            .map(item => `${item.name}: $${item.price.toFixed(2)}`)
-            .join(', ');
-          if (itemList) {
-            description += `. Items: ${itemList}`;
-          }
         }
 
         cleanedData.description = description;

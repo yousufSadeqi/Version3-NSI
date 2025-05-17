@@ -1,19 +1,22 @@
 import cv2
-import pytesseract
 import re
+# new OCR be carefull read full documentation about it 
+import easyocr 
 import numpy as np
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import logging
-import easyocr
 import requests
 from io import BytesIO
 import socket
 from urllib.parse import urlparse
 from datetime import datetime
 from base64 import b64decode
+from dateutil import parser
 
+# since I am trying for french receipt 
 easyocr_reader = easyocr.Reader(['fr'], gpu=False)
+
 app = Flask(__name__)
 CORS(app, resources={r"/*": {
     "origins": "*",
@@ -25,7 +28,6 @@ CORS(app, resources={r"/*": {
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 
 @app.route('/')
 def home():
@@ -43,7 +45,7 @@ def health_check():
         'server_status': 'online',
         'server_ip': socket.gethostbyname(socket.gethostname()),
         'client_ip': request.remote_addr,
-        'tesseract_status': 'available' if pytesseract.get_tesseract_version() else 'unavailable'
+        # 'tesseract_status': 'available' if pytesseract.get_tesseract_version() else 'unavailable'
     })
 
 def download_image(url):
@@ -56,18 +58,11 @@ def download_image(url):
     '''
     try:
         logger.info(f"Attempting to download image from URL: {url}")
-    
-        # encode en base64
+        
         if url.startswith('data:image'):
-            logger.info("Detected base64 image data")
             base64_data = url.split(',')[1]
-            return BytesIO(requests.utils.base64_to_bytes(base64_data))
+            return BytesIO(b64decode(base64_data))
 
-        parsed_url = urlparse(url)
-        if not parsed_url.scheme:
-            url = 'https://' + url
-            
-        # telecharge l'image qui de cloudinary
         response = requests.get(url)
         if response.status_code == 200:
             logger.info(f"Image downloaded successfully: {response.headers.get('Content-Type')}")
@@ -75,32 +70,31 @@ def download_image(url):
         else:
             logger.error(f"Failed to download image. Status code: {response.status_code}")
             return None
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
         logger.error(f"Error downloading image: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}")
         return None
 
 # def preprocess_image(image):
-#     # 1. Convert to grayscale
+#     '''
+#     Cette fonction ameliore la qualité de l'image pour meilleurs resultats d'OCR.
+#     Paramètres:
+#         image (numpy.ndarray): Image d'entré au format BGR
+#     Sortie:
+#         numpy.ndarray: Image binaire traité et utilisé pour l'extraction de texte
+#     '''
 #     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
-#     # 2. Resize to improve small text recognition
 #     gray = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_LINEAR)
-
-#     # 3. Apply bilateral filter to reduce noise while preserving edges
-#     gray = cv2.bilateralFilter(gray, d=9, sigmaColor=75, sigmaSpace=75)
-
-#     # 4. Adaptive thresholding (better for uneven lighting than Otsu)
-#     thresh = cv2.adaptiveThreshold(gray, 255,
-#                                    cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-#                                    cv2.THRESH_BINARY,
-#                                    blockSize=31, C=10)
-
-#     # 5. Morphological operations to close small holes inside text
-#     kernel = np.ones((1, 1), np.uint8)
-#     thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
-
+#     gray = cv2.fastNlMeansDenoising(gray, h=30)
+    
+#     # Appliquer un seuil adaptatif pour gerer les variation illumination
+#     thresh = cv2.adaptiveThreshold(
+#         gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 2
+#     )
+    
 #     return thresh
-
 
 def extract_text(image):
     """
@@ -133,6 +127,7 @@ def extract_text(image):
         last_bottom = bottom_left[1]  # Update last bottom with current block's bottom
     
     return formatted_text
+
 def detect_receipt_language(text):
     '''
     Cette fonction detects si le reçu est en français ou en anglais en utilisant des mots clés
@@ -213,14 +208,14 @@ def determine_category(merchant, items):
         'taxi', 'uber', 'lyft', 'transport', 'bus', 'train', 'plane', 'flight', 'ride-sharing', 'car rental', 
         'subway', 'tram', 'ferry', 'bike rental', 'car hire', 'transportation', 'cab', 'chauffeur', 'shuttle', 
         'scooter', 'chauffeur privé', 'transport public', 'métro', 'train de banlieue', 'tramway', 'vélo', 
-        'location de voiture', 'covoiturage', 'location de scooter', 'taxi collectif', 'moto-taxi'
+        'location de voiture', 'covoiturage', 'location de scooter', 'taxi collectif', 'moto-taxi', 'trum'
     ],
     'utilities': [
         'electric', 'water', 'gas', 'utility', 'electricity bill', 'water bill', 'gas bill', 'internet', 
         'mobile bill', 'telephone bill', 'sewer', 'cable bill', 'wifi', 'broadband', 'heating', 'cooling', 
         'electricity', 'public service', 'consommation d\'électricité', 'facture d\'eau', 'facture de gaz', 
         'facture de téléphone', 'facture d\'internet', 'facture d\'électricité', 'chauffage', 'climatisation',
-        'services publics', 'gaz naturel', 'internet haut débit', 'facture internet', 'service public'
+        'services publics', 'gaz naturel', 'internet haut débit', 'facture internet', 'service public', 'tabac'
     ],
     'entertainment': [
         'cinema', 'movie', 'theater', 'concert', 'show', 'performance', 'sports', 'music', 'event', 'festival', 
@@ -279,18 +274,14 @@ def determine_category(merchant, items):
 
     return 'others'
 
-import re
-
 def parse_items(text):
     '''
-    Cette fonction extrait les articles et leurs prix du texte du ticket de caisse. Elle ignore les lignes comme les totaux, les taxes,
-    et les informations inutiles via une blacklist. Elle gère aussi les prix en double (unité x quantité) et les lignes avec deux montants.
-    
-    Paramètres:
+    Cette fonction extrait les articles et leurs prix du texte du ticket de caisse elle aussi ignore les lignes comme le total les taxes, et 
+    les informations inutiles a cause de blacklist
+    Parametres:
         text (str): Le texte brut extrait de l'image du ticket 
-        
     Sortie:
-        list: Liste de dictionnaires, chaque dictionnaire contient le nom de l'article et son prix
+        list: Liste de dictionnaires chaque dictionnaire contient le nom de l'article et son prix
     '''
     lines = text.split("\n")
     items = []
@@ -302,62 +293,55 @@ def parse_items(text):
         "server", "table", "terminal", "store", "address", "phone", "email", "date", "time", "website",
         "thanks", "welcome", "visit again", "signature", "customer copy", "merchant copy", "restapayer",
         "tva", "payer", "paid", "ref", "voucher", "gift", "promo", "return", "ticket", "ticket #", "item",
-        "due", "savings", "loyalty", "bonus", "conditions", "policy", "articles"
+        "due", "savings", "loyalty", "bonus", "conditions", "policy"
     ]
+
+    def is_all_digits(s):
+        for c in s:
+            if c < '0' or c > '9':
+                return False
+        return True
 
     def contains_blacklist_word(s):
         s_lower = s.lower()
-        return any(b in s_lower for b in blacklist)
-
-    def extract_price_candidates(line):
-        # Replace comma with dot for decimals
-        line = line.replace(",", ".")
-        # Match prices like 3.99, 10.50, 1.99x2, etc.
-        return re.findall(r'\d+\.\d{2}(?:x\d+)?', line)
+        for b in blacklist:
+            if b in s_lower:
+                return True
+        return False
 
     for line in lines:
         line_clean = line.strip()
-        if not line_clean or len(line_clean) < 4 or contains_blacklist_word(line_clean):
+        if not line_clean or len(line_clean) < 4:
             continue
 
-        prices = extract_price_candidates(line_clean)
-
-        if not prices:
+        words = line_clean.split()
+        if len(words) < 2:
             continue
 
-        # Choose the last price as the most likely total price
-        last_price = prices[-1]
+        # Attempt to extract price from the last word on the line
+        last = words[-1].replace(",", ".").replace("€", "").replace("$", "").replace("£", "").strip(" .")
+        num_part = last.replace('.', '')
 
-        # Handle quantity multiplier like 1.99x2
-        if 'x' in last_price:
-            try:
-                unit_price, qty = map(float, last_price.split('x'))
-                price = round(unit_price * qty, 2)
-            except:
-                continue
-        else:
-            try:
-                price = float(last_price)
-            except:
-                continue
+        if last.count('.') > 1 or not is_all_digits(num_part):
+            continue
 
-        # Remove price part from the line to isolate the name
-        name_part = line_clean.replace(last_price, "").strip()
+        try:
+            price = float(last)
+        except:
+            continue
 
-        # Clean up name: remove any trailing standalone numbers or quantities
-        name_tokens = []
-        for word in name_part.split():
-            if re.match(r"^\d+[a-zA-Z]*$", word):
-                continue
-            name_tokens.append(word)
+        # Extract item name from the remaining words
+        name_parts = []
+        for w in words[:-1]:
+            if not is_all_digits(w) and len(w) > 1:
+                name_parts.append(w)
 
-        name = " ".join(name_tokens)
+        name = ' '.join(name_parts).strip()
 
         if name and not contains_blacklist_word(name):
             items.append({'name': name, 'price': price})
 
     return items
-
 
 def parse_total(text):
     '''
@@ -377,7 +361,7 @@ def parse_total(text):
         'BALANCE DUE', 'TOTAL PAID', 'TOTAL PRICE', 'A PAYER', 'NET A PAYER'
     ]
 
-    # Stronger indicators to short-circuit and return immediately
+    # indicators plus forts pour une court complexite et revoie immediatement
     definite_indicators = [
         'TOTAL A PAYER', 'GRAND TOTAL', 'TOTAL DUE', 'MONTANT DÛ',
         'AMOUNT TO PAY', 'NET A PAYER', 'SOMME A PAYER'
@@ -386,7 +370,7 @@ def parse_total(text):
     def is_amount_candidate(s):
         dot_count = 0
         for ch in s:
-            if ch >= '0' and ch <= '9':
+            if '0' <= ch <= '9':  # verifie si c'est un nombre
                 continue
             elif ch == '.':
                 dot_count += 1
@@ -400,7 +384,7 @@ def parse_total(text):
 
         for indicator in definite_indicators:
             if indicator in upper_line:
-                # Check if number exists on the same line
+                line_values = []
                 words = clean_line.split()
                 for word in words:
                     temp = ""
@@ -410,14 +394,19 @@ def parse_total(text):
                         elif ch not in '$€£':
                             temp += ch
 
-                    if len(temp) > 0 and temp[0].isdigit():
-                        num_str = "".join([ch for ch in temp if ch.isdigit() or ch == '.'])
+                    if len(temp) > 0 and '0' <= temp[0] <= '9':
+                        num_str = ""
+                        for ch in temp:
+                            if '0' <= ch <= '9' or ch == '.':
+                                num_str += ch
                         if is_amount_candidate(num_str):
                             val = float(num_str)
                             if val > 0:
-                                return str(val)  # Return immediately if strong match found
+                                line_values.append(val)
+                # la raison pour la quelle on renvoie pas la premiere valuer est peut etre aura on autre nombre que total dans ticket
+                if line_values:
+                    return str(max(line_values))
 
-        # Fallback to general total indicators
         for indicator in amount_indicators:
             if indicator in upper_line:
                 words = clean_line.split()
@@ -429,20 +418,31 @@ def parse_total(text):
                         elif ch not in '$€£':
                             temp += ch
 
-                    if len(temp) > 0 and temp[0].isdigit():
-                        num_str = "".join([ch for ch in temp if ch.isdigit() or ch == '.'])
+                    if len(temp) > 0 and '0' <= temp[0] <= '9':  # verifie si c'est un nombre ou non
+                        num_str = ""
+                        for ch in temp:
+                            if '0' <= ch <= '9' or ch == '.' or ch == ',':
+                                num_str += ch
                         if is_amount_candidate(num_str):
                             val = float(num_str)
                             if val > 0:
                                 total_candidates.append(val)
 
     if total_candidates:
-        return str(max(total_candidates))
+        # trouve le maximum valeur autrement
+        max_val = total_candidates[0]
+        for val in total_candidates[1:]:
+            if val > max_val:
+                max_val = val
+        return str(max_val)
 
-    # Fallback if nothing is found
+    # si on trouve rien 
     items = parse_items(text)
-    total = sum(item['price'] for item in items)
+    total = 0
+    for item in items:
+        total += item['price']
     return str(total)
+
 
 
 
@@ -474,6 +474,8 @@ def parse_title(text):
         text (str) : Le texte
     Sortie :
         str : Le nom du magasin ou "Unknown Merchant" si on le trouve pas.
+    Exlication pour le variable know_merchants: 
+        tout les entreprise que j'ai mets ici je les ai pris sur internet parce que je sais pas beaucoup entreprise commune parmi eux
     '''
     known_merchants = [
     # Global/International
@@ -529,7 +531,8 @@ def parse_title(text):
     "reçu", "ticket", "facture", "date", "heure", "paiement", "especes",
     "espèces", "carte", "montant", "remise", "remboursement", "code", "annulation",
     "merci", "visite", "siret", "numéro", "adresse", "produits", "net", "brut",
-    "total", "sous-total", "net à payer", "à payer", "cb", "remerciements", "resto",
+    "total", "sous-total", "net à payer", "à payer", "cb", "remerciements", "resto", 'Info' ,
+     'Vente', 'Information', 'information vente'
     ]
 
     lines = text.split("\n")
@@ -621,7 +624,7 @@ def create_description(text, merchant, amount, date, items):
             description += " on " + date
         else:
             description += " with unknown date"
-        if items and len(items) > 0:
+        if items and len(valid_items) > 0:
             description += ". Items detected:"
             for item in items:
                 description += " - " + item["name"] + ": $" + str(item["price"])
@@ -630,154 +633,6 @@ def create_description(text, merchant, amount, date, items):
         if amount is None or amount <= 0:
             description += " Total amount not detected."
         return description.strip()
-
-@app.route('/process-receipt', methods=['POST', 'OPTIONS'])
-def process_receipt():
-    '''
-    '''
-    if request.method == 'OPTIONS':
-        return '', 200
-
-    try:
-        data = request.get_json()
-        image_url = data.get('image_url')
-
-        if not image_url:
-            return jsonify({'success': False, 'error': 'No image_url provided'}), 400
-
-        logger.info(f"Received image input: {image_url[:30]}...")
-        
-        if image_url.startswith('data:image'):
-            try:
-                header, base64_data = image_url.split(',', 1)
-                image_data = BytesIO(b64decode(base64_data))
-            except Exception as e:
-                logger.error(f"Failed to decode base64 image: {e}")
-                return jsonify({'success': False, 'error': 'Invalid base64 image data'}), 400
-        else:  
-            logger.info("Received URL. Downloading image...")
-            image_data = download_image(image_url)
-            if not image_data:
-                return jsonify({'success': False, 'error': 'Image download failed'}), 400
-
-        image_array = np.asarray(bytearray(image_data.read()), dtype=np.uint8)
-        image = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
-        if image is None:
-            return jsonify({'success': False, 'error': 'Image decoding failed'}), 400
-
-        # useless with easyOCR
-        # processed_image = preprocess_image(image)
-        extracted_text = extract_text(image)
-        
-        items = parse_items(extracted_text)
-
-        raw_amount = parse_total(extracted_text)
-        try:
-            amount = float(raw_amount.replace(',', '.')) if raw_amount else 0
-        except ValueError:
-            logger.warning(f"Could not parse amount: {raw_amount}")
-            amount = 0
-        
-        if amount <= 0:
-            logger.info("Attempting alternative image processing for amount detection")
-            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-            clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
-            enhanced = clahe.apply(gray)
-            _, high_contrast = cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-            
-            alt_text = extract_text(high_contrast)
-            raw_amount = parse_total(alt_text)
-            if raw_amount:
-                amount = float(raw_amount.replace(',', '.')) 
-            else:
-                amount = 0
-
-        # Final check for the category detector
-        merchant_categories = {
-            "food": [
-                "mcdonald's", "kfc", "subway", "starbucks", "burger king", "domino's", "pizza hut",
-                "dunkin", "tim hortons", "chick-fil-a", "taco bell", "five guys", "wendy's", "popeyes"
-            ],
-            "groceries": [
-                "walmart", "costco", "aldi", "lidl", "tesco", "carrefour", "target", "sainsbury's",
-                "asda", "waitrose", "morrisons", "safeway", "kroger", "publix", "whole foods", "trader joe's",
-                "big bazaar", "reliance fresh", "dmart", "spencer's", "more", "star bazaar", "no frills"
-            ],
-            "shopping": [
-                "amazon", "flipkart", "ebay", "best buy", "ikea", "macy's", "nordstrom", "jcpenney", "kohl's",
-                "bloomingdale's", "argos", "marks & spencer", "nykaa", "myntra", "canadian tire", "big w", "kmart"
-            ],
-            "transport": [
-                "uber", "lyft", "bolt", "grab", "ola", "didi", "blablacar", "careem", "metro transit", "gojek", 'voyage' , 
-                'tao' , 'snfc'
-            ],
-            "utilities": [
-                "con edison", "pacific gas & electric", "british gas", "edf", "enel", "national grid",
-                "hydro one", "e.on", "dominion energy", "xcel energy"
-            ],
-            "entertainment": [
-                "netflix", "spotify", "apple music", "hulu", "disney+", "amazon prime video", "youtube premium",
-                "amc theatres", "cinemark", "regal", "xbox", "playstation store", "steam"
-            ],
-            "health": [
-                "cvs", "walgreens", "rite aid", "boots", "superdrug", "shoppers drug mart", "guardian", "watsons",
-                "london drugs"
-            ],
-            "education": [
-                "coursera", "udemy", "khan academy", "edx", "linkedin learning", "skillshare", "duolingo"
-            ],
-            "travel": [
-                "expedia", "booking.com", "airbnb", "agoda", "trip.com", "trivago", "skyscanner", "delta", "emirates",
-                "united airlines", "air france", "qatar airways", "marriott", "hilton"
-            ],
-            "services": [
-                "fiverr", "upwork", "freelancer", "godaddy", "bluehost", "shopify", "squarespace", "wix",
-                "mailchimp", "canva"
-            ]
-        }
-
-
-        date = parse_date(extracted_text)
-        merchant = parse_title(extracted_text)
-        category = determine_category(merchant, items)
-        description = create_description(extracted_text, merchant, amount, date, items)
-
-        # .lower() cause I used the function title() that automatically make the first letter captical 
-        if category == "others":
-            for key, value in merchant_categories.items():
-                # The reason behind the nested loop is that the parse_title might detect more a word
-                for known in value:
-                    if known in merchant.lower():
-                        category = key
-                        break
-                    # it stop the second we find the category so it didn't go all the way
-                if category != "others":
-                    break
-
-        response_data = {
-            'success': True,
-            'data': {
-                'merchant': merchant,
-                'amount': amount,
-                'date': date,
-                'description': description,
-                'category': category,
-                'raw_text': extracted_text,
-                'items': items
-            }
-        }
-
-        if amount <= 0:
-            logger.warning("Receipt amount could not be determined")
-            return jsonify({'success': False, 'error': 'Receipt amount could not be determined. Please try again with a clearer image.'}), 400
-
-        logger.info("Receipt processing complete")
-        return jsonify(response_data)
-
-    except Exception as e:
-        logger.error(f"Processing error: {e}")
-        return jsonify({'success': False, 'error': str(e), 'serverStatus': 'online'}), 500
-
 
 if __name__ == '__main__':
     test_image_url1 = 'https://res.cloudinary.com/dcijqmjst/image/upload/v1746830264/Receipt%20Photos/x7zn4c92atdtukyxscjq.jpg'
