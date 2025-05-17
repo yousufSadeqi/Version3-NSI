@@ -144,6 +144,7 @@ const styles = StyleSheet.create({
     },
     title: {
         textAlign: 'center',
+        color: 'white',
     },
     message: {
         textAlign: 'center',
